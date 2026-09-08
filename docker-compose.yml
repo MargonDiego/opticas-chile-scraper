@@ -1,0 +1,26 @@
+version: "3.8"
+
+services:
+  opticas-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: opticas_chile_scraper
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - HOST=0.0.0.0
+      - PORT=8000
+      - LOG_LEVEL=INFO
+      - DATABASE_URL=sqlite+aiosqlite:///data/opticas.db
+      - AUTO_SCRAPE_INTERVAL_HOURS=12
+      - SCRAPER_TIMEOUT_SECONDS=30
+      - SCRAPER_MAX_CONCURRENCY=5
+    volumes:
+      - opticas_data:/app/data
+
+volumes:
+  opticas_data:
+    name: opticas_chile_data

@@ -1,0 +1,82 @@
+[
+  {
+    "name": "store:gmo",
+    "color": "0e8a16",
+    "description": "Issues or tasks related to GMO Chile scraper"
+  },
+  {
+    "name": "store:ryk",
+    "color": "1d76db",
+    "description": "Issues or tasks related to Rotter & Krauss scraper"
+  },
+  {
+    "name": "store:schilling",
+    "color": "5319e7",
+    "description": "Issues or tasks related to \u00d3pticas Schilling scraper"
+  },
+  {
+    "name": "store:placevendome",
+    "color": "fbca04",
+    "description": "Issues or tasks related to Place Vend\u00f4me scraper"
+  },
+  {
+    "name": "store:econopticas",
+    "color": "d93f0b",
+    "description": "Issues or tasks related to Econ\u00f3pticas scraper"
+  },
+  {
+    "name": "type:scraper",
+    "color": "c5def5",
+    "description": "Scraper engine and store adapter development"
+  },
+  {
+    "name": "type:api",
+    "color": "bfdadc",
+    "description": "FastAPI endpoints, models, and schemas"
+  },
+  {
+    "name": "type:devops",
+    "color": "d4c5f9",
+    "description": "Docker, Coolify deployment, CI/CD"
+  },
+  {
+    "name": "type:bug",
+    "color": "d73a4a",
+    "description": "Something is not working properly"
+  },
+  {
+    "name": "type:feature",
+    "color": "a2eeef",
+    "description": "New feature or store request"
+  },
+  {
+    "name": "priority:critical",
+    "color": "b60205",
+    "description": "Must be fixed immediately"
+  },
+  {
+    "name": "priority:high",
+    "color": "d93f0b",
+    "description": "High priority task"
+  },
+  {
+    "name": "priority:medium",
+    "color": "fbca04",
+    "description": "Normal priority task"
+  },
+  {
+    "name": "priority:low",
+    "color": "0e8a16",
+    "description": "Low priority task"
+  },
+  {
+    "name": "status:blocked",
+    "color": "000000",
+    "description": "Blocked by external dependency or bot protection"
+  },
+  {
+    "name": "status:in-progress",
+    "color": "ededed",
+    "description": "Currently being worked on"
+  }
+]

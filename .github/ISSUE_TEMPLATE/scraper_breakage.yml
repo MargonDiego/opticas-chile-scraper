@@ -1,0 +1,37 @@
+name: 🚨 Scraper Breakage / Store Change
+description: Report an optical store whose prices or products fail to scrape due to layout changes or blocking
+title: '[Scraper Broken]: <Store Name>'
+labels: ['type:scraper', 'priority:high']
+body:
+  - type: dropdown
+    id: store
+    attributes:
+      label: Affected Optical Store
+      options:
+        - GMO Chile (gmo.cl)
+        - Rotter & Krauss (ryk.cl)
+        - Ópticas Schilling (schilling.cl)
+        - Place Vendôme (opv.cl)
+        - Econópticas (econopticas.cl)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: failure_description
+    attributes:
+      label: Failure Details
+      description: Explain what is failing (e.g. 0 products returned, wrong CLP currency conversion, 403 Forbidden).
+    validations:
+      required: true
+  - type: input
+    id: sample_url
+    attributes:
+      label: Sample Product or Category URL
+      placeholder: 'https://www.gmo.cl/lentes-de-sol'
+    validations:
+      required: true
+  - type: textarea
+    id: error_logs
+    attributes:
+      label: Scraper Error Logs
+      render: shell

@@ -1,0 +1,39 @@
+name: 🐛 Bug Report
+description: Report an issue or error in the API or core system
+title: '[Bug]: '
+labels: ['type:bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting an issue! Please provide as much detail as possible.
+  - type: input
+    id: version
+    attributes:
+      label: System / Release Version
+      placeholder: 'e.g., v0.1.0'
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the Bug
+      description: A clear and concise description of what happened.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to Reproduce
+      description: Steps or API requests to reproduce the behavior.
+      placeholder: |
+        1. Call GET /api/products?store=gmo
+        2. Filter by price_min=50000
+        3. See error response...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs or Traceback
+      render: shell

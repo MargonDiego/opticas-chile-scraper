@@ -1,0 +1,26 @@
+name: 👓 New Optical Store Request
+description: Propose adding support for a new optical store or chain in Chile
+title: '[New Store]: <Store Name>'
+labels: ['type:feature', 'type:scraper']
+body:
+  - type: input
+    id: store_name
+    attributes:
+      label: Optical Store Name
+      placeholder: 'e.g., Ópticas GMO, Ópticas Gilardi, etc.'
+    validations:
+      required: true
+  - type: input
+    id: store_website
+    attributes:
+      label: Store Website URL
+      placeholder: 'https://www.ejemplo-optica.cl'
+    validations:
+      required: true
+  - type: textarea
+    id: justification
+    attributes:
+      label: Target Categories & Relevance
+      description: Mention if they sell sunglasses, prescription glasses, contact lenses, and their catalog size.
+    validations:
+      required: false
