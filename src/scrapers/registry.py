@@ -57,8 +57,14 @@ async def execute_scrape_for_store(store: str, max_pages: Optional[int] = None) 
                 res = await session.execute(stmt)
                 existing_prod = res.scalar_one_or_none()
 
-                embed_text = f"{item.brand} {item.model_name} {item.category} {item.description or ''}"
-                embedding = await ollama_service.get_embedding(embed_text)
+                import re
+                clean_desc = re.sub(r"<[^>]+>", " ", item.description or "")[:200]
+                embed_text = f"{item.brand} {item.model_name} {item.category} {clean_desc}".strip()
+                embedding = None
+                try:
+                    embedding = await ollama_service.get_embedding(embed_text)
+                except Exception as emb_err:
+                    logger.warning(f"Embedding generation failed for {prod_uid}: {emb_err}")
 
                 if existing_prod:
                     existing_prod.brand = item.brand
