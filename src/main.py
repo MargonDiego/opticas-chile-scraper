@@ -497,8 +497,20 @@ async def advisor_chat(
         price = f"${p.current_price_discount:,} CLP" if p.current_price_discount else f"${p.current_price_normal:,} CLP"
         context_lines.append(f"- [{p.store.upper()}] {p.brand} {p.model_name} ({price})")
 
+    # Medical Symptom & Prescription Guardrail
+    medical_terms = ["dolor", "cura", "curar", "receta", "dioptria", "dioptrías", "graduacion", "graduación", "enfermedad", "infeccion", "infección"]
+    has_medical_query = any(w in medical_terms for w in raw_words) or any(t in clean_msg for t in ["me cura", "para curar", "dolor de cabeza", "receta médica"])
+
     context_str = "\n".join(context_lines) if context_lines else "No hay productos coincidentes cargados."
-    ai_response = await ollama_service.ask_advisor(req.message, context_str, is_cheap_intent=is_cheap_intent)
+    
+    if has_medical_query:
+        ai_response = (
+            "Para dolores de cabeza, síntomas visuales o determinación de graduación exacta (como tu miopía), "
+            "es indispensable consultar a un oftalmólogo o tecnólogo médico para obtener tu receta oficial. "
+            "A continuación te comparto opciones de armazones y lentes de contacto disponibles en el catálogo para cuando cuentes con tu receta."
+        )
+    else:
+        ai_response = await ollama_service.ask_advisor(req.message, context_str, is_cheap_intent=is_cheap_intent)
 
     return AdvisorChatResponse(
         response=ai_response,
