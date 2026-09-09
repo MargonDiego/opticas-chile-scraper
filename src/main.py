@@ -261,7 +261,19 @@ OPTICAL_STOP_WORDS = {
     "necesito", "precio", "chile", "como", "unos", "unas", "del", "las",
     "los", "con", "sin", "que", "una", "uno", "por", "favor", "recomienda",
     "recomiendame", "dame", "cual", "cuales", "mejores", "mejor", "buenos",
-    "bueno", "hay", "tienen", "algo", "tipo", "estilo", "marca", "marcas"
+    "bueno", "buenas", "buena", "hay", "tienen", "algo", "tipo", "estilo", "marca", "marcas",
+    "pero", "mas", "más", "menos", "de", "en", "el", "la", "los", "las"
+}
+
+BUDGET_CHEAP_KEYWORDS = {
+    "barato", "baratos", "barata", "baratas", "barto", "bartos", "baratito", "baratitos",
+    "economico", "economicos", "economica", "economicas", "oferta", "ofertas", "descuento",
+    "descuentos", "rebaja", "rebajas", "liquidacion", "liquidaciones", "ganga", "gangas",
+    "accesible", "accesibles", "ahorro", "barat"
+}
+
+BUDGET_EXPENSIVE_KEYWORDS = {
+    "caro", "caros", "cara", "caras", "lujo", "premium", "alta gama", "top", "exclusivo", "exclusivos"
 }
 
 INTENT_CATEGORY_MAP = {
@@ -320,7 +332,16 @@ async def advisor_chat(
 ):
     clean_msg = req.message.lower().strip()
     raw_words = [w.strip(".,;:!?\"'()") for w in clean_msg.split()]
-    meaningful_words = [w for w in raw_words if len(w) >= 3 and w not in OPTICAL_STOP_WORDS]
+    
+    # Detect Budget / Price Intent (with typo tolerance)
+    is_cheap_intent = any(w in BUDGET_CHEAP_KEYWORDS or "barat" in w or "econom" in w for w in raw_words)
+    is_expensive_intent = any(w in BUDGET_EXPENSIVE_KEYWORDS for w in raw_words)
+
+    # Filter meaningful product keywords excluding stop words and budget qualifiers
+    meaningful_words = [
+        w for w in raw_words
+        if len(w) >= 3 and w not in OPTICAL_STOP_WORDS and w not in BUDGET_CHEAP_KEYWORDS and w not in BUDGET_EXPENSIVE_KEYWORDS
+    ]
 
     # Auto-detect category from domain intent if not provided
     inferred_category = req.category
@@ -346,7 +367,7 @@ async def advisor_chat(
     if inferred_category:
         stmt = stmt.where(Product.category == inferred_category)
 
-    # If specific keyword matches exist, prioritize them
+    # If specific keyword matches exist, filter by them
     if search_terms:
         term_conditions = []
         for term in search_terms:
@@ -354,40 +375,48 @@ async def advisor_chat(
             term_conditions.append(Product.brand.ilike(f"%{term}%"))
             term_conditions.append(Product.description.ilike(f"%{term}%"))
         stmt = stmt.where(or_(*term_conditions))
-        stmt = stmt.order_by(Product.updated_at.desc()).limit(5)
+        stmt = stmt.limit(50)
     elif query_vector and settings.DATABASE_URL.startswith("postgresql"):
-        stmt = stmt.order_by(Product.embedding.cosine_distance(query_vector)).limit(5)
+        stmt = stmt.order_by(Product.embedding.cosine_distance(query_vector)).limit(30)
     else:
-        stmt = stmt.order_by(Product.updated_at.desc()).limit(5)
+        stmt = stmt.order_by(Product.updated_at.desc()).limit(50)
 
     res = await session.execute(stmt)
     products = res.scalars().all()
 
-    # If strict search yielded < 3 results, fallback to category search
-    if len(products) < 3 and inferred_category:
+    # If search returned nothing and category is inferred, fallback to category items
+    if not products and inferred_category:
         fallback_stmt = (
             select(Product)
             .options(selectinload(Product.price_snapshots))
             .where(Product.category == inferred_category)
-            .order_by(Product.updated_at.desc())
-            .limit(5)
+            .limit(50)
         )
         res_fb = await session.execute(fallback_stmt)
         products = res_fb.scalars().all()
 
     mapped_products = [_map_product_read(p) for p in products]
 
+    # Smart Ranking by Intent (Price ASC for cheap, Price DESC for luxury, or relevance)
+    if is_cheap_intent:
+        mapped_products.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 99999999))
+    elif is_expensive_intent:
+        mapped_products.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 0), reverse=True)
+
+    # Top 5 final recommendations for user
+    final_products = mapped_products[:5]
+
     context_lines = []
-    for p in mapped_products[:3]:
+    for p in final_products[:3]:
         price = f"${p.current_price_discount:,} CLP" if p.current_price_discount else f"${p.current_price_normal:,} CLP"
         context_lines.append(f"- {p.brand} {p.model_name} ({price} en {p.store.title()})")
 
     context_str = "\n".join(context_lines) if context_lines else "No hay productos coincidentes cargados."
-    ai_response = await ollama_service.ask_advisor(req.message, context_str)
+    ai_response = await ollama_service.ask_advisor(req.message, context_str, is_cheap_intent=is_cheap_intent)
 
     return AdvisorChatResponse(
         response=ai_response,
-        relevant_products=mapped_products,
+        relevant_products=final_products,
     )
 
 

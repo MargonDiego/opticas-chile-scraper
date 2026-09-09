@@ -52,18 +52,24 @@ class OllamaService:
         return None
 
     async def ask_advisor(
-        self, user_query: str, matched_products_context: str
+        self, user_query: str, matched_products_context: str, is_cheap_intent: bool = False
     ) -> str:
         """Use Ollama LLM to synthesize optical product recommendations quickly."""
+        focus_instruction = (
+            "El cliente busca la opción más conveniente, económica y de buena calidad al menor precio en CLP."
+            if is_cheap_intent
+            else "Recomienda el modelo más adecuado justificando según la necesidad del cliente (protección UV, comodidad, actividad o diseño)."
+        )
+
         prompt = (
             "Eres un Asesor Óptico experto en Chile.\n"
             f"Pregunta del cliente: '{user_query}'\n\n"
-            "Opciones disponibles:\n"
+            "Opciones disponibles en catálogo (ordenadas por conveniencia):\n"
             f"{matched_products_context}\n\n"
-            "Instrucciones:\n"
-            "- Recomienda el modelo más adecuado justificando brevemente según la necesidad del cliente (ej. si busca trekking o deporte: agarre, protección UV y polarizado; si busca oficina: descanso visual; si busca ahorro: mejor precio).\n"
-            "- Menciona marca, modelo y precio en CLP.\n"
-            "- Sé claro y directo (máximo 2 a 3 oraciones).\n\n"
+            f"Instrucciones:\n"
+            f"- {focus_instruction}\n"
+            "- Menciona la marca, modelo y precio exacto en CLP.\n"
+            "- Sé directo, profesional y claro (máximo 2 a 3 oraciones).\n\n"
             "Recomendación experta:"
         )
 
