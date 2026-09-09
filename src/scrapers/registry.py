@@ -10,6 +10,8 @@ from src.scrapers.rotter_krauss import RotterKraussScraper
 from src.scrapers.schilling import SchillingScraper
 from src.scrapers.place_vendome import PlaceVendomeScraper
 from src.scrapers.econopticas import EconopticasScraper
+from src.scrapers.karun import KarunScraper
+from src.scrapers.lentesplus import LentesplusScraper
 from src.services.ollama import ollama_service
 
 logger = logging.getLogger(__name__)
@@ -20,6 +22,8 @@ SCRAPER_REGISTRY: Dict[str, type[BaseOpticalScraper]] = {
     StoreEnum.SCHILLING.value: SchillingScraper,
     StoreEnum.PLACE_VENDOME.value: PlaceVendomeScraper,
     StoreEnum.ECONOPTICAS.value: EconopticasScraper,
+    StoreEnum.KARUN.value: KarunScraper,
+    StoreEnum.LENTESPLUS.value: LentesplusScraper,
 }
 
 
@@ -28,7 +32,6 @@ def get_available_stores() -> List[str]:
 
 
 async def execute_scrape_for_store(store: str, max_pages: Optional[int] = None) -> ScrapeJob:
-    """Run scrape pipeline for a single optical store and record price snapshots."""
     scraper_cls = SCRAPER_REGISTRY.get(store)
     if not scraper_cls:
         raise ValueError(f"Unknown store adapter: {store}")
@@ -54,7 +57,6 @@ async def execute_scrape_for_store(store: str, max_pages: Optional[int] = None) 
                 res = await session.execute(stmt)
                 existing_prod = res.scalar_one_or_none()
 
-                # Generate vector embedding for semantic search
                 embed_text = f"{item.brand} {item.model_name} {item.category} {item.description or ''}"
                 embedding = await ollama_service.get_embedding(embed_text)
 

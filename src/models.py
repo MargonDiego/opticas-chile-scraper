@@ -5,7 +5,6 @@ from sqlalchemy import Column, JSON, Text
 from sqlmodel import Field, Relationship, SQLModel
 from src.config import settings
 
-# Attempt to import pgvector Vector type
 try:
     from pgvector.sqlalchemy import Vector
     HAS_PGVECTOR = True
@@ -19,6 +18,8 @@ class StoreEnum(str, Enum):
     SCHILLING = "schilling"
     PLACE_VENDOME = "place_vendome"
     ECONOPTICAS = "econopticas"
+    KARUN = "karun"
+    LENTESPLUS = "lentesplus"
 
 
 class CategoryEnum(str, Enum):
@@ -40,7 +41,7 @@ class JobStatusEnum(str, Enum):
 class Product(SQLModel, table=True):
     __tablename__ = "products"
 
-    id: str = Field(primary_key=True)  # Format: "store:sku"
+    id: str = Field(primary_key=True)
     store: str = Field(index=True)
     store_product_id: str = Field(index=True)
     brand: str = Field(index=True)
@@ -50,8 +51,6 @@ class Product(SQLModel, table=True):
     image_url: Optional[str] = None
     description: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
     
-    # Vector embedding for semantic search and AI recommendations
-    # Uses pgvector Vector type in Postgres or JSON fallback in SQLite
     embedding: Optional[Any] = Field(
         default=None,
         sa_column=Column(Vector(settings.EMBEDDING_DIMENSION), nullable=True)
@@ -62,7 +61,6 @@ class Product(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-    # Relationship to historical price snapshots
     price_snapshots: List["PriceSnapshot"] = Relationship(
         back_populates="product",
         sa_relationship_kwargs={"cascade": "all, delete-orphan", "lazy": "selectin"},
@@ -74,8 +72,8 @@ class PriceSnapshot(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     product_id: str = Field(foreign_key="products.id", index=True)
-    price_normal: int = Field(index=True)  # Chilean Pesos (CLP)
-    price_discount: Optional[int] = None   # CLP if promo active
+    price_normal: int = Field(index=True)
+    price_discount: Optional[int] = None
     discount_percentage: Optional[float] = None
     is_in_stock: bool = Field(default=True)
     scraped_at: datetime = Field(default_factory=datetime.utcnow, index=True)
@@ -96,7 +94,6 @@ class ScrapeJob(SQLModel, table=True):
     completed_at: Optional[datetime] = None
 
 
-# DTO / API Response Schemas
 class PriceSnapshotRead(SQLModel):
     id: int
     price_normal: int
