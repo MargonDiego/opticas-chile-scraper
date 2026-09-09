@@ -31,22 +31,32 @@ def clean_clp_price(raw_price: str | int | float | None) -> Optional[int]:
     if raw_price is None:
         return None
     if isinstance(raw_price, (int, float)):
-        return int(raw_price)
+        val = int(raw_price)
+        if val > 50000000:
+            val = val // 100
+        return min(val, 2147483647)
 
-    # Handle float strings like '105000.00' from Shopify APIs
     str_val = str(raw_price).strip()
-    if re.match(r"^\d+\.\d{2}$", str_val):
-        try:
-            return int(float(str_val))
-        except ValueError:
-            pass
+    # If format has 2 decimals at the end like '105000.00' or '105,000.00'
+    if "." in str_val:
+        parts = str_val.rsplit(".", 1)
+        if len(parts[1]) in (2, 4) and parts[1].isdigit():
+            cleaned = re.sub(r"[^\d]", "", parts[0])
+            if cleaned:
+                try:
+                    return min(int(cleaned), 2147483647)
+                except ValueError:
+                    pass
 
-    # Remove currency symbol, spaces, points (Chile uses period for thousands e.g. $149.990)
+    # Standard CLP string $149.990 or 149990
     cleaned = re.sub(r"[^\d]", "", str_val)
     if not cleaned:
         return None
     try:
-        return int(cleaned)
+        val = int(cleaned)
+        if val > 2147483647:
+            val = val // 1000
+        return min(val, 2147483647)
     except ValueError:
         return None
 
