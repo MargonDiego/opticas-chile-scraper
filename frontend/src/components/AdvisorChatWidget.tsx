@@ -132,29 +132,57 @@ export function AdvisorChatWidget({ apiBaseUrl, apiKey }: Props) {
 
                   {/* Recommended Products Cards */}
                   {m.products && m.products.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-border space-y-2">
-                      <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                        Recomendaciones encontradas:
-                      </p>
-                      {m.products.map((p, pIdx) => (
-                        <a
-                          key={pIdx}
-                          href={p.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center justify-between p-2 rounded-lg bg-card border border-border hover:border-primary text-xs transition-colors"
-                        >
-                          <div className="truncate mr-2">
-                            <span className="font-bold uppercase text-[10px] text-primary">
-                              [{p.store}]
-                            </span>{" "}
-                            <span className="font-medium text-foreground">{p.model_name}</span>
-                          </div>
-                          <span className="font-extrabold text-emerald-600 shrink-0">
-                            {formatCLP(p.current_price_normal)}
-                          </span>
-                        </a>
-                      ))}
+                    <div className="mt-3 pt-3 border-t border-border/80 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                          MATCH // CATÁLOGO:
+                        </span>
+                        <span className="font-mono text-[9.5px] text-primary font-semibold">
+                          {m.products.length} productos
+                        </span>
+                      </div>
+                      <div className="space-y-1.5">
+                        {m.products.map((p, pIdx) => {
+                          const price = p.current_price_discount || p.current_price_normal;
+                          const hasDisc = p.current_price_discount && p.current_price_normal && p.current_price_discount < p.current_price_normal;
+                          return (
+                            <a
+                              key={pIdx}
+                              href={p.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="group/item flex items-center justify-between p-2.5 rounded-xl bg-card border border-border/80 hover:border-primary hover:shadow-md transition-all text-xs"
+                            >
+                              <div className="truncate mr-2 space-y-0.5">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-mono text-[9px] font-bold uppercase px-1.5 py-0.2 bg-primary/10 text-primary rounded">
+                                    {p.store}
+                                  </span>
+                                  <span className="font-mono text-[10px] font-bold text-muted-foreground uppercase">
+                                    {p.brand}
+                                  </span>
+                                </div>
+                                <p className="font-medium text-foreground truncate group-hover/item:text-primary transition-colors text-[11.5px]">
+                                  {p.model_name}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0 font-mono">
+                                <div className="text-right">
+                                  <span className="font-black text-emerald-600 dark:text-emerald-400 text-xs block">
+                                    {formatCLP(price)}
+                                  </span>
+                                  {hasDisc && (
+                                    <span className="text-[9.5px] text-muted-foreground line-through block leading-none">
+                                      {formatCLP(p.current_price_normal)}
+                                    </span>
+                                  )}
+                                </div>
+                                <ExternalLink className="w-3 h-3 text-muted-foreground group-hover/item:text-primary transition-colors" />
+                              </div>
+                            </a>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                 </div>

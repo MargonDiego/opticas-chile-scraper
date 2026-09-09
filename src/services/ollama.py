@@ -57,10 +57,14 @@ class OllamaService:
         """Use Ollama LLM to synthesize optical product recommendations quickly."""
         prompt = (
             "Eres un Asesor Óptico experto en Chile.\n"
-            "Recomienda en una o dos frases la mejor opción según precio y calidad:\n\n"
-            f"Consulta: {user_query}\n"
-            f"Opciones:\n{matched_products_context}\n\n"
-            "Recomendación:"
+            f"Pregunta del cliente: '{user_query}'\n\n"
+            "Opciones disponibles:\n"
+            f"{matched_products_context}\n\n"
+            "Instrucciones:\n"
+            "- Recomienda el modelo más adecuado justificando brevemente según la necesidad del cliente (ej. si busca trekking o deporte: agarre, protección UV y polarizado; si busca oficina: descanso visual; si busca ahorro: mejor precio).\n"
+            "- Menciona marca, modelo y precio en CLP.\n"
+            "- Sé claro y directo (máximo 2 a 3 oraciones).\n\n"
+            "Recomendación experta:"
         )
 
         payload = {
@@ -68,10 +72,10 @@ class OllamaService:
             "prompt": prompt,
             "stream": False,
             "options": {
-                "num_predict": 45,     # Sub-4 second response on dual-core CPU
+                "num_predict": 65,     # Balanced for high quality & fast CPU latency
                 "num_thread": 4,       # Full hardware threads
-                "temperature": 0.1,    # Fast greedy sampling
-                "top_k": 10,
+                "temperature": 0.2,    # Focused yet natural
+                "top_k": 15,
             },
         }
 

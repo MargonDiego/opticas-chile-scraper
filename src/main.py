@@ -256,32 +256,125 @@ async def semantic_search(
     return results
 
 
+OPTICAL_STOP_WORDS = {
+    "lentes", "anteojos", "gafas", "para", "busca", "buscar", "quiero",
+    "necesito", "precio", "chile", "como", "unos", "unas", "del", "las",
+    "los", "con", "sin", "que", "una", "uno", "por", "favor", "recomienda",
+    "recomiendame", "dame", "cual", "cuales", "mejores", "mejor", "buenos",
+    "bueno", "hay", "tienen", "algo", "tipo", "estilo", "marca", "marcas"
+}
+
+INTENT_CATEGORY_MAP = {
+    "trekking": "sol",
+    "senderismo": "sol",
+    "montaña": "sol",
+    "playa": "sol",
+    "deporte": "sol",
+    "deportivos": "sol",
+    "ciclismo": "sol",
+    "running": "sol",
+    "sol": "sol",
+    "polarizados": "sol",
+    "polarizado": "sol",
+    "armazon": "opticos",
+    "armazones": "opticos",
+    "marcos": "opticos",
+    "marco": "opticos",
+    "computador": "opticos",
+    "pantalla": "opticos",
+    "pantallas": "opticos",
+    "oficina": "opticos",
+    "filtro azul": "opticos",
+    "blue defense": "opticos",
+    "contacto": "contacto",
+    "acuvue": "contacto",
+    "biofinity": "contacto",
+    "astigmatismo": "contacto",
+    "miopia": "contacto",
+}
+
+INTENT_SYNONYMS = {
+    "trekking": ["outdoor", "polarizad", "karun", "oakley", "arnette", "deport", "sol"],
+    "senderismo": ["outdoor", "polarizad", "karun", "oakley", "sol"],
+    "montaña": ["outdoor", "polarizad", "karun", "oakley", "sol"],
+    "deporte": ["oakley", "arnette", "polarizad", "deport", "sol"],
+    "deportivos": ["oakley", "arnette", "polarizad", "deport", "sol"],
+    "ciclismo": ["oakley", "arnette", "polarizad", "sol"],
+    "running": ["oakley", "polarizad", "arnette", "sol"],
+    "computador": ["blue", "azul", "filtro", "optico"],
+    "pantalla": ["blue", "azul", "filtro", "optico"],
+    "pantallas": ["blue", "azul", "filtro", "optico"],
+    "polarizados": ["polarizad", "polarizado"],
+    "polarizado": ["polarizad", "polarizado"],
+    "contacto": ["contacto", "acuvue", "biofinity", "soflens", "dailies"],
+    "rayban": ["ray-ban", "ray ban", "aviator", "wayfarer"],
+    "oakley": ["oakley", "deport", "polarizad"],
+    "karun": ["karun", "sustentable", "polarizad"],
+}
+
+
 @app.post("/api/advisor/chat", response_model=AdvisorChatResponse, tags=["AI & Vector Search"], dependencies=[Depends(get_api_key)])
 async def advisor_chat(
     req: AdvisorChatRequest,
     session: AsyncSession = Depends(get_session),
 ):
+    clean_msg = req.message.lower().strip()
+    raw_words = [w.strip(".,;:!?\"'()") for w in clean_msg.split()]
+    meaningful_words = [w for w in raw_words if len(w) >= 3 and w not in OPTICAL_STOP_WORDS]
+
+    # Auto-detect category from domain intent if not provided
+    inferred_category = req.category
+    if not inferred_category:
+        for w in raw_words:
+            if w in INTENT_CATEGORY_MAP:
+                inferred_category = INTENT_CATEGORY_MAP[w]
+                break
+
+    # Expand keywords with domain synonyms
+    search_terms = list(meaningful_words)
+    for w in meaningful_words:
+        if w in INTENT_SYNONYMS:
+            for syn in INTENT_SYNONYMS[w]:
+                if syn not in search_terms:
+                    search_terms.append(syn)
+
     query_vector = await ollama_service.get_embedding(req.message)
     stmt = select(Product).options(selectinload(Product.price_snapshots))
+
     if req.store:
         stmt = stmt.where(Product.store == req.store)
-    if req.category:
-        stmt = stmt.where(Product.category == req.category)
+    if inferred_category:
+        stmt = stmt.where(Product.category == inferred_category)
 
-    if query_vector and settings.DATABASE_URL.startswith("postgresql"):
+    # If specific keyword matches exist, prioritize them
+    if search_terms:
+        term_conditions = []
+        for term in search_terms:
+            term_conditions.append(Product.model_name.ilike(f"%{term}%"))
+            term_conditions.append(Product.brand.ilike(f"%{term}%"))
+            term_conditions.append(Product.description.ilike(f"%{term}%"))
+        stmt = stmt.where(or_(*term_conditions))
+        stmt = stmt.order_by(Product.updated_at.desc()).limit(5)
+    elif query_vector and settings.DATABASE_URL.startswith("postgresql"):
         stmt = stmt.order_by(Product.embedding.cosine_distance(query_vector)).limit(5)
     else:
-        words = [w.strip() for w in req.message.split() if len(w.strip()) >= 3]
-        if words:
-            conditions = [
-                or_(Product.model_name.ilike(f"%{w}%"), Product.brand.ilike(f"%{w}%"), Product.category.ilike(f"%{w}%"))
-                for w in words
-            ]
-            stmt = stmt.where(or_(*conditions))
         stmt = stmt.order_by(Product.updated_at.desc()).limit(5)
 
     res = await session.execute(stmt)
     products = res.scalars().all()
+
+    # If strict search yielded < 3 results, fallback to category search
+    if len(products) < 3 and inferred_category:
+        fallback_stmt = (
+            select(Product)
+            .options(selectinload(Product.price_snapshots))
+            .where(Product.category == inferred_category)
+            .order_by(Product.updated_at.desc())
+            .limit(5)
+        )
+        res_fb = await session.execute(fallback_stmt)
+        products = res_fb.scalars().all()
+
     mapped_products = [_map_product_read(p) for p in products]
 
     context_lines = []
