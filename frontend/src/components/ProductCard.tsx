@@ -1,8 +1,9 @@
 import React, { useState } from "react";
 import { StoreBadge } from "./StoreBadge";
 import { formatCLP } from "@/lib/utils";
-import { ExternalLink, History, Sparkles, Glasses, CheckCircle2 } from "lucide-react";
+import { ExternalLink, History, Sparkles, Glasses, AlertCircle } from "lucide-react";
 import { Button } from "./ui/button";
+import { Badge } from "./ui/badge";
 
 export interface Product {
   id: string;
@@ -49,7 +50,10 @@ export function ProductCard({ product, onViewHistory }: Props) {
   const [imgError, setImgError] = useState(false);
   const resolvedImgUrl = resolveImageUrl(product.image_url, product.store);
 
+  const isOutOfStock = product.current_in_stock === false;
+
   const hasDiscount =
+    !isOutOfStock &&
     product.current_price_discount &&
     product.current_price_normal &&
     product.current_price_discount < product.current_price_normal;
@@ -63,15 +67,25 @@ export function ProductCard({ product, onViewHistory }: Props) {
     : null;
 
   return (
-    <div className="group relative flex flex-col bg-card text-card-foreground rounded-2xl border border-border/80 hover:border-primary/40 shadow-sm hover:shadow-xl hover:shadow-primary/5 transition-all duration-300 overflow-hidden">
+    <div className={`group relative flex flex-col bg-card text-card-foreground rounded-2xl border transition-all duration-300 overflow-hidden ${
+      isOutOfStock 
+        ? "border-border/60 opacity-80 hover:opacity-100" 
+        : "border-border/80 hover:border-primary/40 shadow-sm hover:shadow-xl hover:shadow-primary/10"
+    }`}>
       {/* Top Header / Badges */}
       <div className="flex items-center justify-between p-3.5 pb-2 z-10">
         <StoreBadge store={product.store} />
-        {hasDiscount && (
-          <span className="inline-flex items-center gap-1 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 text-[11px] font-bold px-2 py-0.5 rounded-full">
-            <Sparkles className="w-3 h-3" /> -{discountPct}%
-          </span>
-        )}
+        <div className="flex items-center gap-1.5">
+          {isOutOfStock ? (
+            <Badge variant="destructive" className="text-[10px] font-bold gap-1 px-2 py-0.5">
+              <AlertCircle className="w-3 h-3" /> Sin Stock
+            </Badge>
+          ) : hasDiscount ? (
+            <span className="inline-flex items-center gap-1 bg-primary/20 text-foreground border border-primary/40 text-[11px] font-black px-2 py-0.5 rounded-full">
+              <Sparkles className="w-3 h-3 text-primary" /> -{discountPct}%
+            </span>
+          ) : null}
+        </div>
       </div>
 
       {/* Image Container with robust fallback */}
@@ -81,7 +95,9 @@ export function ProductCard({ product, onViewHistory }: Props) {
             src={resolvedImgUrl}
             alt={product.model_name}
             onError={() => setImgError(true)}
-            className="w-full h-full object-contain transform group-hover:scale-105 transition-transform duration-300"
+            className={`w-full h-full object-contain transform group-hover:scale-105 transition-transform duration-300 ${
+              isOutOfStock ? "grayscale contrast-75 opacity-70" : ""
+            }`}
             loading="lazy"
           />
         ) : (
@@ -112,9 +128,13 @@ export function ProductCard({ product, onViewHistory }: Props) {
         {/* Pricing */}
         <div className="mt-auto pt-4">
           <div className="flex items-baseline gap-2 font-mono">
-            {hasDiscount ? (
+            {isOutOfStock ? (
+              <span className="text-sm font-bold text-muted-foreground italic">
+                No disponible actualmente
+              </span>
+            ) : hasDiscount ? (
               <>
-                <span className="text-lg font-black text-emerald-600 dark:text-emerald-400 tracking-tight">
+                <span className="text-lg font-black text-primary tracking-tight">
                   {formatCLP(product.current_price_discount)}
                 </span>
                 <span className="text-xs text-muted-foreground/80 line-through font-medium">
@@ -138,14 +158,25 @@ export function ProductCard({ product, onViewHistory }: Props) {
             >
               <History className="w-3.5 h-3.5" /> Historial
             </Button>
-            <a
-              href={product.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center gap-1.5 text-xs font-medium h-8 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm"
-            >
-              Comprar <ExternalLink className="w-3 h-3" />
-            </a>
+            {isOutOfStock ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled
+                className="text-xs h-8 opacity-60 cursor-not-allowed"
+              >
+                Agotado
+              </Button>
+            ) : (
+              <a
+                href={product.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center gap-1.5 text-xs font-bold h-8 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-all shadow-sm"
+              >
+                Comprar <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
           </div>
         </div>
       </div>

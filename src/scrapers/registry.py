@@ -95,15 +95,30 @@ async def execute_scrape_for_store(store: str, max_pages: Optional[int] = None) 
                         ((item.price_normal - item.price_discount) / item.price_normal) * 100, 2
                     )
 
-                snapshot = PriceSnapshot(
-                    product_id=product_id,
-                    price_normal=item.price_normal,
-                    price_discount=item.price_discount,
-                    discount_percentage=discount_pct,
-                    is_in_stock=item.is_in_stock,
-                    scraped_at=now,
-                )
-                session.add(snapshot)
+                today_start = datetime(now.year, now.month, now.day)
+                stmt_snap = select(PriceSnapshot).where(
+                    PriceSnapshot.product_id == product_id,
+                    PriceSnapshot.scraped_at >= today_start
+                ).order_by(PriceSnapshot.scraped_at.desc())
+                res_snap = await session.execute(stmt_snap)
+                today_snapshot = res_snap.scalars().first()
+
+                if today_snapshot:
+                    today_snapshot.price_normal = item.price_normal
+                    today_snapshot.price_discount = item.price_discount
+                    today_snapshot.discount_percentage = discount_pct
+                    today_snapshot.is_in_stock = item.is_in_stock
+                    today_snapshot.scraped_at = now
+                else:
+                    snapshot = PriceSnapshot(
+                        product_id=product_id,
+                        price_normal=item.price_normal,
+                        price_discount=item.price_discount,
+                        discount_percentage=discount_pct,
+                        is_in_stock=item.is_in_stock,
+                        scraped_at=now,
+                    )
+                    session.add(snapshot)
 
                 if items_scraped % 50 == 0:
                     await session.commit()

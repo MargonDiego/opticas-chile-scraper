@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Button } from "./ui/button";
+import { Dialog, DialogContent, DialogTitle } from "./ui/dialog";
 import { formatCLP } from "@/lib/utils";
 import { X, TrendingDown, TrendingUp, History, ExternalLink } from "lucide-react";
 
@@ -56,20 +57,14 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
   if (!productId) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="bg-card text-card-foreground border border-border w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden">
+    <Dialog open={!!productId} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent onClose={onClose} className="p-0 overflow-hidden max-w-2xl">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/30">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/20">
           <div className="flex items-center gap-2">
             <History className="w-5 h-5 text-primary" />
-            <h3 className="font-semibold text-lg">Historial de Precios</h3>
+            <DialogTitle className="text-lg">Historial de Precios</DialogTitle>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
         </div>
 
         {/* Content */}
@@ -180,7 +175,7 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
             <p className="text-sm text-rose-500 text-center py-6">No se pudo cargar la información del producto.</p>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
