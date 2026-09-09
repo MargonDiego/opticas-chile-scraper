@@ -39,7 +39,7 @@ services:
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
       - ENABLE_SECURITY_HEADERS=true
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-opticas_user}:${POSTGRES_PASSWORD:-opticas_pass_123}@postgres:5432/${POSTGRES_DB:-opticas_db}
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://192.168.1.85:11434}
       - OLLAMA_EMBED_MODEL=${OLLAMA_EMBED_MODEL:-nomic-embed-text}
       - OLLAMA_LLM_MODEL=${OLLAMA_LLM_MODEL:-qwen2.5:1.5b}
       - AUTO_SCRAPE_INTERVAL_HOURS=12
