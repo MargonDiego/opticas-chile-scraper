@@ -7,8 +7,11 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
     LOG_LEVEL: str = "INFO"
+
+    # Database: Default SQLite for quick local test / PostgreSQL+asyncpg with pgvector for production
     DATABASE_URL: str = "sqlite+aiosqlite:///data/opticas.db"
 
+    # Scraper Settings
     DEFAULT_USER_AGENT: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
@@ -18,8 +21,15 @@ class Settings(BaseSettings):
     SCRAPER_RETRY_ATTEMPTS: int = 3
     AUTO_SCRAPE_INTERVAL_HOURS: int = 12
 
+    # Spider Engine
     SPIDER_API_KEY: Optional[str] = None
     SPIDER_HOST: str = "http://localhost:3030"
+
+    # Ollama Service (Homelab / Coolify)
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_EMBED_MODEL: str = "nomic-embed-text"
+    OLLAMA_LLM_MODEL: str = "llama3"
+    EMBEDDING_DIMENSION: int = 768
 
     model_config = SettingsConfigDict(
         env_file=".env",

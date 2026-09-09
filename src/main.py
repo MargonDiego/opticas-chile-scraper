@@ -12,6 +12,8 @@ from sqlalchemy.orm import selectinload
 from src.config import settings
 from src.database import get_session, init_db
 from src.models import (
+    AdvisorChatRequest,
+    AdvisorChatResponse,
     JobStatusEnum,
     PriceSnapshot,
     PriceSnapshotRead,
@@ -21,12 +23,14 @@ from src.models import (
     ScrapeJob,
     ScrapeTriggerRequest,
     ScrapeTriggerResponse,
+    SemanticSearchRequest,
+    SemanticSearchResult,
     StoreEnum,
 )
 from src.scheduler import shutdown_scheduler, start_scheduler
 from src.scrapers.registry import execute_scrape_for_store, get_available_stores
+from src.services.ollama import ollama_service
 
-# Setup logging
 logging.basicConfig(
     level=settings.LOG_LEVEL,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -36,20 +40,18 @@ logger = logging.getLogger("opticas_api")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    logger.info("Initializing Chilean Optics Scraper API...")
+    logger.info("Initializing Chilean Optics Scraper & AI API...")
     await init_db()
     start_scheduler()
     yield
-    # Shutdown
-    logger.info("Shutting down Chilean Optics Scraper API...")
+    logger.info("Shutting down Chilean Optics Scraper & AI API...")
     shutdown_scheduler()
 
 
 app = FastAPI(
-    title="👓 Chilean Optics Scraper & Price Monitor API",
-    description="High-performance API to crawl, track, and compare optical product prices across major retail chains in Chile.",
-    version="0.1.0",
+    title="👓 Chilean Optics Scraper, pgvector & AI API",
+    description="High-performance API to crawl, track, compare, and semantically search optical products across Chile with pgvector & Ollama.",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -67,13 +69,14 @@ async def health_check():
     return {
         "status": "healthy",
         "environment": settings.ENVIRONMENT,
+        "database": "postgresql+pgvector" if settings.DATABASE_URL.startswith("postgresql") else "sqlite",
+        "ollama_host": settings.OLLAMA_BASE_URL,
         "available_stores": get_available_stores(),
     }
 
 
 @app.get("/api/stores", tags=["Stores"])
 async def list_stores():
-    """List all supported optical chains."""
     return {
         "stores": [
             {"id": "gmo", "name": "GMO Chile", "url": "https://www.gmo.cl"},
@@ -83,6 +86,30 @@ async def list_stores():
             {"id": "econopticas", "name": "Econópticas", "url": "https://www.econopticas.cl"},
         ]
     }
+
+
+def _map_product_read(prod: Product) -> ProductRead:
+    latest = None
+    if prod.price_snapshots:
+        sorted_snaps = sorted(prod.price_snapshots, key=lambda s: s.scraped_at, reverse=True)
+        latest = sorted_snaps[0]
+
+    return ProductRead(
+        id=prod.id,
+        store=prod.store,
+        store_product_id=prod.store_product_id,
+        brand=prod.brand,
+        model_name=prod.model_name,
+        category=prod.category,
+        url=prod.url,
+        image_url=prod.image_url,
+        description=prod.description,
+        created_at=prod.created_at,
+        updated_at=prod.updated_at,
+        current_price_normal=latest.price_normal if latest else None,
+        current_price_discount=latest.price_discount if latest else None,
+        current_in_stock=latest.is_in_stock if latest else None,
+    )
 
 
 @app.get("/api/products", response_model=List[ProductRead], tags=["Products"])
@@ -97,7 +124,6 @@ async def get_products(
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_session),
 ):
-    """List and search products with their latest price information."""
     stmt = select(Product).options(selectinload(Product.price_snapshots))
 
     if store:
@@ -113,40 +139,16 @@ async def get_products(
     res = await session.execute(stmt)
     products = res.scalars().all()
 
-    result: List[ProductRead] = []
+    result = []
     for prod in products:
-        latest_snapshot = None
-        if prod.price_snapshots:
-            # Sort snapshots by scraped_at desc
-            sorted_snaps = sorted(prod.price_snapshots, key=lambda s: s.scraped_at, reverse=True)
-            latest_snapshot = sorted_snaps[0]
-
-        # Apply price filters if specified
-        if latest_snapshot:
-            current_price = latest_snapshot.price_discount or latest_snapshot.price_normal
+        mapped = _map_product_read(prod)
+        current_price = mapped.current_price_discount or mapped.current_price_normal
+        if current_price is not None:
             if min_price and current_price < min_price:
                 continue
             if max_price and current_price > max_price:
                 continue
-
-        result.append(
-            ProductRead(
-                id=prod.id,
-                store=prod.store,
-                store_product_id=prod.store_product_id,
-                brand=prod.brand,
-                model_name=prod.model_name,
-                category=prod.category,
-                url=prod.url,
-                image_url=prod.image_url,
-                description=prod.description,
-                created_at=prod.created_at,
-                updated_at=prod.updated_at,
-                current_price_normal=latest_snapshot.price_normal if latest_snapshot else None,
-                current_price_discount=latest_snapshot.price_discount if latest_snapshot else None,
-                current_in_stock=latest_snapshot.is_in_stock if latest_snapshot else None,
-            )
-        )
+        result.append(mapped)
 
     return result
 
@@ -156,7 +158,6 @@ async def get_product_detail(
     product_id: str,
     session: AsyncSession = Depends(get_session),
 ):
-    """Get detailed product info including complete historical price snapshots."""
     stmt = select(Product).where(Product.id == product_id).options(selectinload(Product.price_snapshots))
     res = await session.execute(stmt)
     prod = res.scalar_one_or_none()
@@ -196,12 +197,83 @@ async def get_product_detail(
     )
 
 
+@app.post("/api/products/search/semantic", response_model=List[SemanticSearchResult], tags=["AI & Vector Search"])
+async def semantic_search(
+    req: SemanticSearchRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Semantic vector similarity search across optical catalogs using Ollama + pgvector."""
+    query_vector = await ollama_service.get_embedding(req.query)
+
+    stmt = select(Product).options(selectinload(Product.price_snapshots))
+    if req.store:
+        stmt = stmt.where(Product.store == req.store)
+    if req.category:
+        stmt = stmt.where(Product.category == req.category)
+
+    if query_vector and settings.DATABASE_URL.startswith("postgresql"):
+        # Use pgvector cosine distance operator <=>
+        stmt = stmt.order_by(Product.embedding.cosine_distance(query_vector)).limit(req.limit)
+        res = await session.execute(stmt)
+        products = res.scalars().all()
+    else:
+        # Fallback to text ILIKE matching if SQLite or Ollama offline
+        stmt = stmt.where(Product.model_name.ilike(f"%{req.query}%")).limit(req.limit)
+        res = await session.execute(stmt)
+        products = res.scalars().all()
+
+    results = []
+    for prod in products:
+        mapped = _map_product_read(prod)
+        results.append(SemanticSearchResult(**mapped.model_dump()))
+    return results
+
+
+@app.post("/api/advisor/chat", response_model=AdvisorChatResponse, tags=["AI & Vector Search"])
+async def advisor_chat(
+    req: AdvisorChatRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Ask Ollama AI Advisor for tailored recommendations across Chilean optical stores."""
+    # 1. Retrieve top matching products
+    query_vector = await ollama_service.get_embedding(req.message)
+    stmt = select(Product).options(selectinload(Product.price_snapshots))
+    if req.store:
+        stmt = stmt.where(Product.store == req.store)
+    if req.category:
+        stmt = stmt.where(Product.category == req.category)
+
+    if query_vector and settings.DATABASE_URL.startswith("postgresql"):
+        stmt = stmt.order_by(Product.embedding.cosine_distance(query_vector)).limit(5)
+    else:
+        stmt = stmt.order_by(Product.updated_at.desc()).limit(5)
+
+    res = await session.execute(stmt)
+    products = res.scalars().all()
+    mapped_products = [_map_product_read(p) for p in products]
+
+    # 2. Format context for Ollama LLM
+    context_lines = []
+    for p in mapped_products:
+        price = f"${p.current_price_discount:,} CLP (Antes: ${p.current_price_normal:,})" if p.current_price_discount else f"${p.current_price_normal:,} CLP"
+        context_lines.append(f"- [{p.store.upper()}] {p.brand} {p.model_name} ({p.category}) - Precio: {price} - Link: {p.url}")
+
+    context_str = "\n".join(context_lines) if context_lines else "No hay productos coincidentes cargados actualmente."
+
+    # 3. Ask Ollama LLM
+    ai_response = await ollama_service.ask_advisor(req.message, context_str)
+
+    return AdvisorChatResponse(
+        response=ai_response,
+        relevant_products=mapped_products,
+    )
+
+
 @app.post("/api/scrape/trigger", response_model=ScrapeTriggerResponse, tags=["Scraping"])
 async def trigger_scrape(
     request: ScrapeTriggerRequest,
     background_tasks: BackgroundTasks,
 ):
-    """Trigger an on-demand scraping job for a specific optical store or all stores."""
     available = get_available_stores()
     target_stores = available if request.store == "all" else [request.store]
 
@@ -221,7 +293,6 @@ async def list_scrape_jobs(
     limit: int = 20,
     session: AsyncSession = Depends(get_session),
 ):
-    """View status and history of scraping background jobs."""
     stmt = select(ScrapeJob).order_by(ScrapeJob.started_at.desc()).limit(limit)
     res = await session.execute(stmt)
     return res.scalars().all()
@@ -229,7 +300,6 @@ async def list_scrape_jobs(
 
 @app.get("/api/export/csv", tags=["Export"])
 async def export_csv(session: AsyncSession = Depends(get_session)):
-    """Download all current product data with prices as a CSV file."""
     stmt = select(Product).options(selectinload(Product.price_snapshots))
     res = await session.execute(stmt)
     products = res.scalars().all()
@@ -266,26 +336,9 @@ async def export_csv(session: AsyncSession = Depends(get_session)):
 
 @app.get("/api/export/json", tags=["Export"])
 async def export_json(session: AsyncSession = Depends(get_session)):
-    """Download all current product data with prices as JSON."""
     stmt = select(Product).options(selectinload(Product.price_snapshots))
     res = await session.execute(stmt)
     products = res.scalars().all()
 
-    data = []
-    for prod in products:
-        latest = sorted(prod.price_snapshots, key=lambda s: s.scraped_at, reverse=True)[0] if prod.price_snapshots else None
-        data.append({
-            "id": prod.id,
-            "store": prod.store,
-            "brand": prod.brand,
-            "model_name": prod.model_name,
-            "category": prod.category,
-            "price_normal": latest.price_normal if latest else None,
-            "price_discount": latest.price_discount if latest else None,
-            "is_in_stock": latest.is_in_stock if latest else None,
-            "url": prod.url,
-            "image_url": prod.image_url,
-            "updated_at": prod.updated_at.isoformat() if prod.updated_at else None,
-        })
-
+    data = [_map_product_read(p).model_dump() for p in products]
     return data

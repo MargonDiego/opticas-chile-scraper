@@ -1,11 +1,14 @@
 import os
+import logging
 from typing import AsyncGenerator
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel
 from src.config import settings
 
-# Ensure data directory exists
+logger = logging.getLogger(__name__)
+
 if settings.DATABASE_URL.startswith("sqlite"):
     os.makedirs("data", exist_ok=True)
 
@@ -21,8 +24,15 @@ async_session_factory = sessionmaker(
 
 
 async def init_db() -> None:
-    """Initialize tables in the database."""
+    """Initialize tables and create pgvector extension if on PostgreSQL."""
     async with engine.begin() as conn:
+        if settings.DATABASE_URL.startswith("postgresql"):
+            try:
+                await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+                logger.info("pgvector extension initialized on PostgreSQL.")
+            except Exception as e:
+                logger.warning(f"Could not enable vector extension: {e}")
+
         await conn.run_sync(SQLModel.metadata.create_all)
 
 

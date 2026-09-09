@@ -10,6 +10,7 @@ from src.scrapers.rotter_krauss import RotterKraussScraper
 from src.scrapers.schilling import SchillingScraper
 from src.scrapers.place_vendome import PlaceVendomeScraper
 from src.scrapers.econopticas import EconopticasScraper
+from src.services.ollama import ollama_service
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,6 @@ async def execute_scrape_for_store(store: str, max_pages: Optional[int] = None) 
     now = datetime.utcnow()
 
     async with async_session_factory() as session:
-        # Create job record
         job = ScrapeJob(store=store, status=JobStatusEnum.RUNNING.value, started_at=now)
         session.add(job)
         await session.commit()
@@ -50,10 +50,13 @@ async def execute_scrape_for_store(store: str, max_pages: Optional[int] = None) 
                 items_scraped += 1
                 prod_uid = f"{item.store}:{item.store_product_id}"
 
-                # Check if product already exists
                 stmt = select(Product).where(Product.id == prod_uid)
                 res = await session.execute(stmt)
                 existing_prod = res.scalar_one_or_none()
+
+                # Generate vector embedding for semantic search
+                embed_text = f"{item.brand} {item.model_name} {item.category} {item.description or ''}"
+                embedding = await ollama_service.get_embedding(embed_text)
 
                 if existing_prod:
                     existing_prod.brand = item.brand
@@ -61,6 +64,8 @@ async def execute_scrape_for_store(store: str, max_pages: Optional[int] = None) 
                     existing_prod.category = item.category
                     existing_prod.url = item.url
                     existing_prod.image_url = item.image_url or existing_prod.image_url
+                    if embedding:
+                        existing_prod.embedding = embedding
                     existing_prod.updated_at = now
                     product_id = existing_prod.id
                     items_updated += 1
@@ -75,20 +80,19 @@ async def execute_scrape_for_store(store: str, max_pages: Optional[int] = None) 
                         url=item.url,
                         image_url=item.image_url,
                         description=item.description,
+                        embedding=embedding,
                         created_at=now,
                         updated_at=now,
                     )
                     session.add(new_prod)
                     product_id = new_prod.id
 
-                # Calculate discount percentage
                 discount_pct = None
                 if item.price_discount and item.price_normal > item.price_discount:
                     discount_pct = round(
                         ((item.price_normal - item.price_discount) / item.price_normal) * 100, 2
                     )
 
-                # Add price snapshot
                 snapshot = PriceSnapshot(
                     product_id=product_id,
                     price_normal=item.price_normal,
@@ -99,11 +103,9 @@ async def execute_scrape_for_store(store: str, max_pages: Optional[int] = None) 
                 )
                 session.add(snapshot)
 
-                # Commit in batches of 50 to conserve memory
                 if items_scraped % 50 == 0:
                     await session.commit()
 
-            # Mark job complete
             job.status = JobStatusEnum.COMPLETED.value
             job.items_scraped = items_scraped
             job.items_updated = items_updated

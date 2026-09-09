@@ -1,85 +1,87 @@
 # 🚀 Despliegue en Homelab con Coolify (Ubuntu - 192.168.1.85)
 
-Esta guía detalla cómo desplegar el servicio **Chilean Optics Scraper & API** en tu servidor Ubuntu con **Coolify**.
+Esta guía detalla cómo desplegar el servicio **Chilean Optics Scraper & AI API** con **PostgreSQL + pgvector** y **Ollama** en tu servidor con Coolify.
 
 ---
 
-## 📋 Requisitos Previos
+## 🏗️ Arquitectura de Servicios en Coolify
 
-- Servidor Ubuntu en `192.168.1.85` con Coolify instalado y corriendo.
-- Acceso a la interfaz web de Coolify (generalmente en `http://192.168.1.85:8000` o el puerto configurado).
-- Repositorio de GitHub con este código.
+- **`opticas-api`**: FastAPI app con los scrapers, cron de scraping y endpoints de IA.
+- **`postgres` (`pgvector/pgvector:pg16`)**: Base de datos relacional y vectorial para búsqueda semántica.
+- **`ollama`**: Servidor de modelos LLM (`llama3`, `qwen2.5`) y Embeddings (`nomic-embed-text`) ya instalado en tu servidor.
 
 ---
 
-## 🛠️ Opción 1: Despliegue desde la UI de Coolify (Recomendado)
+## 🛠️ Opción 1: Despliegue con Docker Compose en Coolify (Recomendado)
 
-1. **Crear Nuevo Recurso**:
+1. **Crear Nuevo Recurso en Coolify**:
    - Entrá a tu panel de Coolify en `http://192.168.1.85:8000`.
-   - Seleccioná tu **Project** / **Environment**.
-   - Hacé clic en **+ New Resource** -> **Application** -> **Public Repository** (o Private con tu GitHub App/Deploy Key).
-
-2. **Configurar el Repositorio**:
-   - URL del repositorio: `https://github.com/tu-usuario/opticas-chile-scraper`
+   - Clic en **+ New Resource** -> **Application** -> **Public Repository**.
+   - URL del repo: `https://github.com/MargonDiego/opticas-chile-scraper`
    - Branch: `main`
-   - Build Pack: **Dockerfile** (o **Docker Compose**).
+   - Build Pack: **Docker Compose**.
 
-3. **Configurar Variables de Entorno (Environment Variables)**:
-   Agregá en Coolify:
+2. **Variables de Entorno en Coolify**:
+   Agregá en la sección de Environment Variables:
    ```env
    ENVIRONMENT=production
    PORT=8000
-   DATABASE_URL=sqlite+aiosqlite:///data/opticas.db
-   AUTO_SCRAPE_INTERVAL_HOURS=12
-   SCRAPER_MAX_CONCURRENCY=5
+   POSTGRES_USER=opticas_user
+   POSTGRES_PASSWORD=opticas_pass_segura_123
+   POSTGRES_DB=opticas_db
+   OLLAMA_BASE_URL=http://host.docker.internal:11434
+   OLLAMA_EMBED_MODEL=nomic-embed-text
+   OLLAMA_LLM_MODEL=llama3
+   ```
+   *(Nota: si Ollama está en la misma red de Docker de Coolify, podés usar su hostname directo ej: `http://ollama:11434`)*.
+
+3. **Descargar Modelos en Ollama (si aún no los tenés)**:
+   En la consola de tu servidor Ubuntu:
+   ```bash
+   ollama pull nomic-embed-text
+   ollama pull llama3
    ```
 
-4. **Configurar Almacenamiento Persistente (Volumes)**:
-   Para que la base de datos con el historial de precios no se borre entre reinicios:
-   - Volume / Mount: `opticas_data:/app/data`
-
-5. **Exposición de Puerto**:
-   - Port Mapping: `8000:8000` (o asignale un dominio interno/local con el proxy Caddy/Traefik de Coolify, ej: `http://opticas.local`).
-
-6. **Desplegar**:
-   - Hacé clic en **Deploy**.
-   - `uv` compilará la imagen en segundos.
+4. **Desplegar**:
+   - Hacé clic en **Deploy**. Coolify levantará Postgres con pgvector y compilará la API con `uv` al instante.
 
 ---
 
-## 🖥️ Opción 2: Despliegue directo por SSH y Docker Compose
-
-Si preferís levantarlo directamente por terminal en el servidor:
+## 🖥️ Opción 2: Despliegue directo por Terminal (SSH)
 
 ```bash
 # 1. Conectarse al servidor Ubuntu
 ssh chalaox@192.168.1.85
 
-# 2. Clonar el repositorio
-git clone https://github.com/tu-usuario/opticas-chile-scraper.git /home/chalaox/opticas-chile-scraper
+# 2. Clonar o actualizar repo
+git clone https://github.com/MargonDiego/opticas-chile-scraper.git /home/chalaox/opticas-chile-scraper
 cd /home/chalaox/opticas-chile-scraper
 
 # 3. Levantar con Docker Compose
 docker compose up -d --build
 
-# 4. Verificar logs
-docker compose logs -f
+# 4. Ver estado de contenedores
+docker compose ps
+docker compose logs -f opticas-api
 ```
 
 ---
 
-## 🔍 Verificación Post-Despliegue
+## 🔍 Endpoints y Pruebas
 
-1. **Healthcheck**:
-   ```bash
-   curl http://192.168.1.85:8000/api/health
-   ```
-2. **Swagger UI**:
-   Abrí en tu navegador: `http://192.168.1.85:8000/docs`
+1. **Swagger UI**:
+   Abrí `http://192.168.1.85:8000/docs`
 
-3. **Disparar un Scrape Manual de Prueba**:
+2. **Búsqueda Semántica con IA (`pgvector`)**:
    ```bash
-   curl -X POST http://192.168.1.85:8000/api/scrape/trigger \
+   curl -X POST http://192.168.1.85:8000/api/products/search/semantic \
      -H "Content-Type: application/json" \
-     -d '{"store": "gmo", "max_pages": 2}'
+     -d '{"query": "armazón dorado vintage para sol", "limit": 5}'
+   ```
+
+3. **Asesor Inteligente con Ollama (`/api/advisor/chat`)**:
+   ```bash
+   curl -X POST http://192.168.1.85:8000/api/advisor/chat \
+     -H "Content-Type: application/json" \
+     -d '{"message": "Recomiéndame lentes de sol polarizados para manejar por menos de 70.000 CLP"}'
    ```

@@ -1,40 +1,36 @@
-# 👓 Chilean Optics Scraper & Price Monitor API
+# 👓 Chilean Optics Scraper, pgvector & Ollama AI API
 
-[![CI](https://github.com/your-username/opticas-chile-scraper/actions/workflows/ci.yml/badge.svg)](https://github.com/your-username/opticas-chile-scraper/actions/workflows/ci.yml)
+[![CI](https://github.com/MargonDiego/opticas-chile-scraper/actions/workflows/ci.yml/badge.svg)](https://github.com/MargonDiego/opticas-chile-scraper/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11-blue.svg)](https://www.python.org/)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector%2016-336791.svg)](https://github.com/pgvector/pgvector)
+[![Ollama](https://img.shields.io/badge/Ollama-LLM%20%2B%20Embeddings-black.svg)](https://ollama.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A high-performance web scraper and REST API for tracking and comparing optical product prices across major optical retail chains in Chile.
+A high-performance web scraper, vector search, and AI assistant REST API for tracking, comparing, and semantically querying optical products across major retail chains in Chile.
 
-Powered by **[uv](https://github.com/astral-sh/uv)** for fast dependency management, **[spider-rs](https://github.com/spider-rs/spider)** for high-throughput web crawling, and **FastAPI** with SQLModel for price history and querying.
+Powered by **[`uv`](https://github.com/astral-sh/uv)**, **PostgreSQL with `pgvector`**, **[`Ollama`](https://ollama.com)** for local LLM recommendations & embeddings, and **FastAPI**.
 
 ---
 
-## 🏬 Target Optical Chains in Chile
+## 🏬 Cadenas de Ópticas Cubiertas en Chile
 
-| Store Name | Domain | Platform | Target Categories |
+| Tienda | Dominio | Plataforma | Categorías Objetivo |
 | :--- | :--- | :--- | :--- |
-| **GMO Chile** | gmo.cl | Luxottica Enterprise / Custom | Sunglasses, Eyeglasses, Contact Lenses |
-| **Rotter & Krauss** | 
-yk.cl / 
-otterandkrauss.cl | GrandVision / VTEX / Shopify | Sunglasses, Eyeglasses, Contact Lenses |
-| **Ópticas Schilling** | schilling.cl | VTEX / Custom | Sunglasses, Eyeglasses, Contact Lenses |
-| **Place Vendôme** | opv.cl / placevendome.cl | VTEX / Custom | Designer Frames, Sunglasses, Lenses |
-| **Econópticas** | econopticas.cl | VTEX | Budget Eyewear, Sunglasses, Contact Lenses |
+| **GMO Chile** | `gmo.cl` | Luxottica Enterprise / Custom | Lentes de Sol, Ópticos, Contacto |
+| **Rotter & Krauss** | `ryk.cl` / `rotterandkrauss.cl` | GrandVision / VTEX / Shopify | Lentes de Sol, Ópticos, Contacto |
+| **Ópticas Schilling** | `schilling.cl` | VTEX / Custom | Lentes de Sol, Ópticos, Contacto |
+| **Place Vendôme** | `opv.cl` / `placevendome.cl` | VTEX / Custom | Armazones de Diseño, Sol, Cristales |
+| **Econópticas** | `econopticas.cl` | VTEX | Lentes Económicos, Sol, Contacto |
 
 ---
 
-## 🏗️ Architecture
+## 🏗️ Arquitectura del Sistema
 
-`mermaid
+```mermaid
 flowchart TD
-    subgraph CrawlerLayer [Crawler & Network Engine]
-        SpiderClient[Spider-rs Rust Engine / Headless Chrome]
-        HTTPClient[Async HTTPX Client with Rate-Limiting]
-    end
-
-    subgraph StoreAdapters [Optical Store Adapters]
+    subgraph ScrapingLayer [Scraper & Network Engine]
+        SpiderClient[Spider-rs / Async HTTPX Client]
         GMOAdapter[GMO Chile Adapter]
         RYKAdapter[Rotter & Krauss Adapter]
         SchillingAdapter[Ópticas Schilling Adapter]
@@ -42,106 +38,83 @@ flowchart TD
         EcoAdapter[Econópticas Adapter]
     end
 
-    subgraph Pipeline [Data Processing & Storage]
-        Normalizer[Currency & Data Normalizer]
-        DB[(SQLite / PostgreSQL - Price Snapshots)]
-        Scheduler[APScheduler / Cron Engine]
+    subgraph AILayer [Ollama & Embeddings]
+        OllamaEmbed[Ollama nomic-embed-text]
+        OllamaLLM[Ollama llama3 / qwen2.5]
+    end
+
+    subgraph Storage [PostgreSQL + pgvector]
+        DB[(PostgreSQL 16)]
+        VectorIndex[pgvector HNSW / Cosine Index]
+        HistoryTable[Price Snapshots History]
     end
 
     subgraph API [FastAPI Service]
-        Endpoints[REST Endpoints / Swagger UI]
-        Exports[CSV / JSON Exports]
+        RestAPI[Filtros, Catálogo y Precios CLP]
+        SemanticSearch[Búsqueda Semántica Vectorial]
+        AIAssistant[Asesor Inteligente RAG]
+        Exports[Exportación CSV / JSON]
     end
 
-    CrawlerLayer --> StoreAdapters
-    StoreAdapters --> Normalizer
-    Normalizer --> DB
-    Scheduler --> CrawlerLayer
-    DB --> Endpoints
-    DB --> Exports
-`
+    ScrapingLayer --> OllamaEmbed
+    OllamaEmbed --> DB
+    ScrapingLayer --> HistoryTable
+    DB --> VectorIndex
+    VectorIndex --> SemanticSearch
+    VectorIndex --> AIAssistant
+    OllamaLLM --> AIAssistant
+    HistoryTable --> RestAPI
+    HistoryTable --> Exports
+```
 
 ---
 
-## 🚀 Quick Start (Local Development)
+## 🚀 Inicio Rápido (Desarrollo Local)
 
-### Prerequisites
-- [uv](https://docs.astral.sh/uv/) (Astral Python package manager)
-- Python 3.10 or 3.11
-
-### 1. Clone and Install
-`ash
-git clone https://github.com/your-username/opticas-chile-scraper.git
+### 1. Clonar e Instalar dependencias con `uv`
+```bash
+git clone https://github.com/MargonDiego/opticas-chile-scraper.git
 cd opticas-chile-scraper
 
-# Install all dependencies with uv
+# Sincronizar entorno virtual
 uv sync
-`
+```
 
-### 2. Configure Environment
-`ash
-cp .env.example .env
-# Edit .env to adjust database paths or scrape intervals
-`
-
-### 3. Run the Service
-`ash
-uv run uvicorn src.main:app --reload --port 8000
-`
-Open [http://localhost:8000/docs](http://localhost:8000/docs) to access the interactive Swagger API documentation.
-
-### 4. Run Tests
-`ash
+### 2. Ejecutar Tests
+```bash
 uv run pytest -v
-`
+```
+
+### 3. Levantar la API localmente
+```bash
+uv run uvicorn src.main:app --reload --port 8000
+```
+Documentación Swagger disponible en [http://localhost:8000/docs](http://localhost:8000/docs).
 
 ---
 
-## 🌐 REST API Reference
+## 🌐 Endpoints Principales de la API
 
-| Method | Endpoint | Description |
+| Método | Endpoint | Descripción |
 | :--- | :--- | :--- |
-| GET | /api/health | Healthcheck and store scraping status. |
-| GET | /api/products | Filter products by store, rand, category, price_min, price_max, search. |
-| GET | /api/products/{id} | Retrieve details for a specific optical product. |
-| GET | /api/products/{id}/history | Retrieve historical price snapshots for a product over time. |
-| POST | /api/scrape/trigger | Trigger on-demand scrape job (store: gmo, 
-yk, schilling, place_vendome, econopticas, or ll). |
-| GET | /api/scrape/jobs | View background scraping job status and logs. |
-| GET | /api/export/csv | Download products and latest prices as CSV. |
-| GET | /api/export/json | Download products and latest prices as JSON. |
+| `GET` | `/api/health` | Estado del sistema, PostgreSQL y conexión a Ollama. |
+| `GET` | `/api/products` | Filtros por tienda, marca, categoría, rango de precios en CLP y texto. |
+| `GET` | `/api/products/{id}` | Ficha técnica con historial completo de variaciones de precio. |
+| `POST` | `/api/products/search/semantic` | **Búsqueda Semántica Vectorial** con pgvector + Ollama. |
+| `POST` | `/api/advisor/chat` | **Asesor Inteligente RAG** potenciado por Ollama LLM. |
+| `POST` | `/api/scrape/trigger` | Disparar scraping en background por tienda o todas. |
+| `GET` | `/api/scrape/jobs` | Historial y estado de jobs de scraping. |
+| `GET` | `/api/export/csv` / `.json` | Descarga de datasets completos en CSV o JSON. |
 
 ---
 
-## 🐳 Coolify / Homelab Deployment
+## 🐳 Despliegue en Homelab con Coolify (`192.168.1.85`)
 
-This project includes a production-ready Dockerfile and docker-compose.yml optimized for 1-click deployment in **Coolify** on your local server (192.168.1.85).
+El proyecto incluye `docker-compose.yml` con **PostgreSQL + pgvector** (`pgvector/pgvector:pg16`) y conexión directa al **Ollama** de tu servidor.
 
-### Deploy via Coolify UI:
-1. In Coolify, click **Create New Resource** -> **Application** -> **Public/Private Git Repository**.
-2. Point to this GitHub repository.
-3. Select **Docker Compose** or **Dockerfile** as build pack.
-4. Set persistent storage volume:
-   - Volume: opticas-data:/app/data
-5. Click **Deploy**.
-
-For detailed step-by-step instructions, see [DEPLOY_COOLIFY.md](DEPLOY_COOLIFY.md).
+Consultá la guía completa en **[DEPLOY_COOLIFY.md](DEPLOY_COOLIFY.md)**.
 
 ---
 
-## 🏷️ GitHub Issues & Labels Taxonomy
-
-When contributing or reporting issues, use the appropriate Issue Templates:
-- **🐛 Bug Report**: General API, database, or scheduler issues.
-- **🚨 Scraper Breakage**: Store layout changes, price mismatches, or bot blocks.
-- **👓 New Store Request**: Proposal to add a new optical retailer in Chile.
-
-### Labels Guide
-- store:<name>: Specific store (e.g. store:gmo, store:ryk, store:schilling, store:placevendome, store:econopticas).
-- 	ype:<kind>: 	ype:scraper, 	ype:api, 	ype:devops, 	ype:bug, 	ype:feature.
-- priority:<level>: priority:critical, priority:high, priority:medium, priority:low.
-
----
-
-## 📄 License
-This project is licensed under the MIT License - see the LICENSE file for details.
+## 📄 Licencia
+Distribuido bajo la Licencia MIT.

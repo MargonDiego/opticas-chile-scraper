@@ -1,7 +1,16 @@
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional
+from typing import Any, List, Optional
+from sqlalchemy import Column, JSON, Text
 from sqlmodel import Field, Relationship, SQLModel
+from src.config import settings
+
+# Attempt to import pgvector Vector type
+try:
+    from pgvector.sqlalchemy import Vector
+    HAS_PGVECTOR = True
+except ImportError:
+    HAS_PGVECTOR = False
 
 
 class StoreEnum(str, Enum):
@@ -39,7 +48,17 @@ class Product(SQLModel, table=True):
     category: str = Field(default=CategoryEnum.OTRO.value, index=True)
     url: str
     image_url: Optional[str] = None
-    description: Optional[str] = None
+    description: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    
+    # Vector embedding for semantic search and AI recommendations
+    # Uses pgvector Vector type in Postgres or JSON fallback in SQLite
+    embedding: Optional[Any] = Field(
+        default=None,
+        sa_column=Column(Vector(settings.EMBEDDING_DIMENSION), nullable=True)
+        if HAS_PGVECTOR and settings.DATABASE_URL.startswith("postgresql")
+        else Column(JSON, nullable=True),
+    )
+
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -108,8 +127,30 @@ class ProductDetailRead(ProductRead):
     price_snapshots: List[PriceSnapshotRead] = []
 
 
+class SemanticSearchRequest(SQLModel):
+    query: str
+    store: Optional[str] = None
+    category: Optional[str] = None
+    limit: int = 10
+
+
+class SemanticSearchResult(ProductRead):
+    similarity_score: Optional[float] = None
+
+
+class AdvisorChatRequest(SQLModel):
+    message: str
+    store: Optional[str] = None
+    category: Optional[str] = None
+
+
+class AdvisorChatResponse(SQLModel):
+    response: str
+    relevant_products: List[ProductRead] = []
+
+
 class ScrapeTriggerRequest(SQLModel):
-    store: str = "all"  # "gmo", "ryk", "schilling", "place_vendome", "econopticas", or "all"
+    store: str = "all"
     max_pages: Optional[int] = None
 
 
