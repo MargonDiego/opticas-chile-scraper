@@ -52,11 +52,11 @@ export function ProductCard({ product, onViewHistory }: Props) {
 
   const isOutOfStock = product.current_in_stock === false;
 
-  const hasDiscount =
-    !isOutOfStock &&
+  const hasDiscount = Boolean(
     product.current_price_discount &&
-    product.current_price_normal &&
-    product.current_price_discount < product.current_price_normal;
+      product.current_price_normal &&
+      product.current_price_discount < product.current_price_normal
+  );
 
   const discountPct = hasDiscount
     ? Math.round(
@@ -69,22 +69,23 @@ export function ProductCard({ product, onViewHistory }: Props) {
   return (
     <div className={`group relative flex flex-col bg-card text-card-foreground rounded-2xl border transition-all duration-300 overflow-hidden ${
       isOutOfStock 
-        ? "border-border/60 opacity-80 hover:opacity-100" 
+        ? "border-border/60 opacity-85 hover:opacity-100" 
         : "border-border/80 hover:border-primary/40 shadow-sm hover:shadow-xl hover:shadow-primary/10"
     }`}>
       {/* Top Header / Badges */}
       <div className="flex items-center justify-between p-3.5 pb-2 z-10">
         <StoreBadge store={product.store} />
         <div className="flex items-center gap-1.5">
-          {isOutOfStock ? (
+          {isOutOfStock && (
             <Badge variant="destructive" className="text-[10px] font-bold gap-1 px-2 py-0.5">
               <AlertCircle className="w-3 h-3" /> Sin Stock
             </Badge>
-          ) : hasDiscount ? (
+          )}
+          {hasDiscount && (
             <span className="inline-flex items-center gap-1 bg-primary/20 text-foreground border border-primary/40 text-[11px] font-black px-2 py-0.5 rounded-full">
               <Sparkles className="w-3 h-3 text-primary" /> -{discountPct}%
             </span>
-          ) : null}
+          )}
         </div>
       </div>
 
@@ -128,11 +129,7 @@ export function ProductCard({ product, onViewHistory }: Props) {
         {/* Pricing */}
         <div className="mt-auto pt-4">
           <div className="flex items-baseline gap-2 font-mono">
-            {isOutOfStock ? (
-              <span className="text-sm font-bold text-muted-foreground italic">
-                No disponible actualmente
-              </span>
-            ) : hasDiscount ? (
+            {hasDiscount ? (
               <>
                 <span className="text-lg font-black text-primary tracking-tight">
                   {formatCLP(product.current_price_discount)}
@@ -141,9 +138,13 @@ export function ProductCard({ product, onViewHistory }: Props) {
                   {formatCLP(product.current_price_normal)}
                 </span>
               </>
-            ) : (
+            ) : product.current_price_normal ? (
               <span className="text-lg font-black text-foreground tracking-tight">
                 {formatCLP(product.current_price_normal)}
+              </span>
+            ) : (
+              <span className="text-sm font-bold text-muted-foreground italic">
+                Precio no disponible
               </span>
             )}
           </div>
