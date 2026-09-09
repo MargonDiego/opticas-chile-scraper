@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     PORT: int = 8000
     LOG_LEVEL: str = "INFO"
 
-    # Database: Default SQLite for quick local test / PostgreSQL+asyncpg with pgvector for production
+    # Database: Default SQLite for local dev/test; PostgreSQL+asyncpg with pgvector in Docker
     DATABASE_URL: str = "sqlite+aiosqlite:///data/opticas.db"
 
     # Scraper Settings
@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     # Ollama Service (Homelab / Coolify)
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_EMBED_MODEL: str = "nomic-embed-text"
-    OLLAMA_LLM_MODEL: str = "llama3"
+    OLLAMA_LLM_MODEL: str = "qwen2.5:1.5b"
     EMBEDDING_DIMENSION: int = 768
 
     model_config = SettingsConfigDict(

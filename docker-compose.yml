@@ -1,7 +1,7 @@
 version: "3.8"
 
 services:
-  # PostgreSQL with pgvector extension
+  # Dedicated PostgreSQL with pgvector for Chilean Optics project
   postgres:
     image: pgvector/pgvector:pg16
     container_name: opticas_postgres_vector
@@ -13,7 +13,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - opticas_postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-opticas_user} -d ${POSTGRES_DB:-opticas_db}"]
       interval: 10s
@@ -40,17 +40,17 @@ services:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-opticas_user}:${POSTGRES_PASSWORD:-opticas_pass_123}@postgres:5432/${POSTGRES_DB:-opticas_db}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - OLLAMA_EMBED_MODEL=${OLLAMA_EMBED_MODEL:-nomic-embed-text}
-      - OLLAMA_LLM_MODEL=${OLLAMA_LLM_MODEL:-llama3}
+      - OLLAMA_LLM_MODEL=${OLLAMA_LLM_MODEL:-qwen2.5:1.5b}
       - AUTO_SCRAPE_INTERVAL_HOURS=12
       - SCRAPER_TIMEOUT_SECONDS=30
       - SCRAPER_MAX_CONCURRENCY=5
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - app_data:/app/data
+      - opticas_app_data:/app/data
 
 volumes:
-  postgres_data:
+  opticas_postgres_data:
     name: opticas_postgres_data
-  app_data:
+  opticas_app_data:
     name: opticas_app_data
