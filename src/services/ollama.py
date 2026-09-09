@@ -6,6 +6,19 @@ from src.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _clean_trailing_sentence(text: str) -> str:
+    """Trim incomplete trailing sentence fragments to guarantee clean full stops."""
+    trimmed = text.strip()
+    if not trimmed:
+        return trimmed
+    if trimmed[-1] in ".!?":
+        return trimmed
+    last_punct = max(trimmed.rfind("."), trimmed.rfind("!"), trimmed.rfind("?"))
+    if last_punct > 25:
+        return trimmed[: last_punct + 1]
+    return trimmed + "."
+
+
 class OllamaService:
     """Client for Ollama LLM and Vector Embedding services with CPU optimizations."""
 
@@ -13,7 +26,7 @@ class OllamaService:
         self.base_url = settings.OLLAMA_BASE_URL.rstrip("/")
         self.embed_model = settings.OLLAMA_EMBED_MODEL
         self.llm_model = settings.OLLAMA_LLM_MODEL
-        self.timeout = httpx.Timeout(20.0, connect=1.2)
+        self.timeout = httpx.Timeout(25.0, connect=1.2)
         self._working_url: Optional[str] = None
 
     def _get_candidate_urls(self) -> List[str]:
@@ -56,21 +69,21 @@ class OllamaService:
     ) -> str:
         """Use Ollama LLM to synthesize optical product recommendations quickly."""
         focus_instruction = (
-            "El cliente busca la opción más conveniente, económica y de buena calidad al menor precio en CLP."
+            "El cliente busca la opción más conveniente y económica. Compara las tiendas y destaca la alternativa más barata."
             if is_cheap_intent
-            else "Recomienda el modelo más adecuado justificando según la necesidad del cliente (protección UV, comodidad, actividad o diseño)."
+            else "Recomienda la mejor opción justificando según la necesidad del cliente y comparando tiendas."
         )
 
         prompt = (
             "Eres un Asesor Óptico experto en Chile.\n"
             f"Pregunta del cliente: '{user_query}'\n\n"
-            "Opciones disponibles en catálogo (ordenadas por conveniencia):\n"
+            "Opciones comparadas por tienda:\n"
             f"{matched_products_context}\n\n"
-            f"Instrucciones:\n"
+            "Instrucciones:\n"
             f"- {focus_instruction}\n"
-            "- Menciona la marca, modelo y precio exacto en CLP.\n"
-            "- Sé directo, profesional y claro (máximo 2 a 3 oraciones).\n\n"
-            "Recomendación experta:"
+            "- Menciona la tienda, marca, modelo y precio en CLP.\n"
+            "- Responde en 2 a 3 oraciones completas y termina siempre con punto final.\n\n"
+            "Recomendación:"
         )
 
         payload = {
@@ -78,7 +91,7 @@ class OllamaService:
             "prompt": prompt,
             "stream": False,
             "options": {
-                "num_predict": 65,     # Balanced for high quality & fast CPU latency
+                "num_predict": 120,    # Generous budget to prevent cut-off sentences
                 "num_thread": 4,       # Full hardware threads
                 "temperature": 0.2,    # Focused yet natural
                 "top_k": 15,
@@ -92,8 +105,8 @@ class OllamaService:
                     res = await client.post(url, json=payload)
                     if res.status_code == 200:
                         self._working_url = base
-                        data = res.json()
-                        return data.get("response", "No se pudo generar respuesta del asesor.")
+                        raw_ans = res.json().get("response", "")
+                        return _clean_trailing_sentence(raw_ans) if raw_ans else "Opciones encontradas en catálogo:"
             except Exception as e:
                 logger.debug(f"Ollama chat attempt failed on {base}: {e}")
                 continue

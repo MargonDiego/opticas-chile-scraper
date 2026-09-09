@@ -394,22 +394,37 @@ async def advisor_chat(
         )
         res_fb = await session.execute(fallback_stmt)
         products = res_fb.scalars().all()
-
     mapped_products = [_map_product_read(p) for p in products]
 
-    # Smart Ranking by Intent (Price ASC for cheap, Price DESC for luxury, or relevance)
+    # Sort all matching products by price or relevance first
     if is_cheap_intent:
         mapped_products.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 99999999))
     elif is_expensive_intent:
         mapped_products.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 0), reverse=True)
 
-    # Top 5 final recommendations for user
-    final_products = mapped_products[:5]
+    # Cross-Store Diversity Ranking: pick the best option from each distinct store first!
+    store_best = {}
+    store_remaining = []
+    for p in mapped_products:
+        st_key = p.store.lower()
+        if st_key not in store_best:
+            store_best[st_key] = p
+        else:
+            store_remaining.append(p)
+
+    diverse_products = list(store_best.values())
+    if is_cheap_intent:
+        diverse_products.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 99999999))
+    elif is_expensive_intent:
+        diverse_products.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 0), reverse=True)
+
+    # Combine diverse products across stores + top remaining products up to 5 items
+    final_products = (diverse_products + store_remaining)[:5]
 
     context_lines = []
-    for p in final_products[:3]:
+    for p in final_products[:4]:
         price = f"${p.current_price_discount:,} CLP" if p.current_price_discount else f"${p.current_price_normal:,} CLP"
-        context_lines.append(f"- {p.brand} {p.model_name} ({price} en {p.store.title()})")
+        context_lines.append(f"- [{p.store.upper()}] {p.brand} {p.model_name} ({price})")
 
     context_str = "\n".join(context_lines) if context_lines else "No hay productos coincidentes cargados."
     ai_response = await ollama_service.ask_advisor(req.message, context_str, is_cheap_intent=is_cheap_intent)
