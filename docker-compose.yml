@@ -1,7 +1,7 @@
 version: "3.8"
 
 services:
-  # Dedicated PostgreSQL with pgvector (isolated on private Docker network)
+  # Dedicated PostgreSQL with pgvector
   postgres:
     image: pgvector/pgvector:pg16
     container_name: opticas_postgres_vector
@@ -18,7 +18,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # Chilean Optics Scraper & AI REST API (Hardened with API Key & Security Headers)
+  # Chilean Optics Scraper & AI REST API
   opticas-api:
     build:
       context: .
@@ -35,7 +35,7 @@ services:
       - HOST=0.0.0.0
       - PORT=8000
       - LOG_LEVEL=INFO
-      - API_KEY=${API_KEY:-}
+      - API_KEY=${API_KEY:-dB57RDrRgEPNO6VK9AGUZoNwWANPBlrGgTOqk1D28OUqy5OhetekKsqfKDDAdoHoB7BowKMniCR4Guoiqxd2uNJyiKPyXKMS4AtgmC87FbzyJmPGeG7wJDFiRfwZp6Gj}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
       - ENABLE_SECURITY_HEADERS=true
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-opticas_user}:${POSTGRES_PASSWORD:-opticas_pass_123}@postgres:5432/${POSTGRES_DB:-opticas_db}
@@ -49,6 +49,21 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - opticas_app_data:/app/data
+
+  # Astro + React + shadcn/ui Frontend (Served on Port 3001)
+  opticas-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: opticas_chile_frontend
+    restart: unless-stopped
+    depends_on:
+      - opticas-api
+    ports:
+      - "${FRONTEND_PORT:-3001}:3001"
+    environment:
+      - PUBLIC_API_URL=${PUBLIC_API_URL:-http://192.168.1.85:8008}
+      - PUBLIC_API_KEY=${API_KEY:-dB57RDrRgEPNO6VK9AGUZoNwWANPBlrGgTOqk1D28OUqy5OhetekKsqfKDDAdoHoB7BowKMniCR4Guoiqxd2uNJyiKPyXKMS4AtgmC87FbzyJmPGeG7wJDFiRfwZp6Gj}
 
 volumes:
   opticas_postgres_data:
