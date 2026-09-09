@@ -13,4 +13,12 @@ export default defineConfig({
     host: "0.0.0.0",
     port: 3001,
   },
+  vite: {
+    server: {
+      allowedHosts: true,
+    },
+    preview: {
+      allowedHosts: true,
+    },
+  },
 });
