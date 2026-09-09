@@ -262,7 +262,8 @@ OPTICAL_STOP_WORDS = {
     "los", "con", "sin", "que", "una", "uno", "por", "favor", "recomienda",
     "recomiendame", "dame", "cual", "cuales", "mejores", "mejor", "buenos",
     "bueno", "buenas", "buena", "hay", "tienen", "algo", "tipo", "estilo", "marca", "marcas",
-    "pero", "mas", "más", "menos", "de", "en", "el", "la", "los", "las"
+    "pero", "mas", "más", "menos", "de", "en", "el", "la", "los", "las",
+    "pa", "para", "piola", "weno", "buenisimo", "bakan", "bacanes", "onda", "unos"
 }
 
 BUDGET_CHEAP_KEYWORDS = {
@@ -296,6 +297,9 @@ INTENT_CATEGORY_MAP = {
     "pantalla": "opticos",
     "pantallas": "opticos",
     "oficina": "opticos",
+    "pega": "opticos",
+    "trabajo": "opticos",
+    "laburo": "opticos",
     "filtro azul": "opticos",
     "blue defense": "opticos",
     "contacto": "contacto",
@@ -316,12 +320,18 @@ INTENT_SYNONYMS = {
     "computador": ["blue", "azul", "filtro", "optico"],
     "pantalla": ["blue", "azul", "filtro", "optico"],
     "pantallas": ["blue", "azul", "filtro", "optico"],
+    "pega": ["optico", "azul", "blue", "armazon"],
+    "trabajo": ["optico", "azul", "blue", "armazon"],
     "polarizados": ["polarizad", "polarizado"],
     "polarizado": ["polarizad", "polarizado"],
     "contacto": ["contacto", "acuvue", "biofinity", "soflens", "dailies"],
     "rayban": ["ray-ban", "ray ban", "aviator", "wayfarer"],
     "oakley": ["oakley", "deport", "polarizad"],
     "karun": ["karun", "sustentable", "polarizad"],
+    "ecologicos": ["karun", "sustentable"],
+    "ecologicas": ["karun", "sustentable"],
+    "sustentables": ["karun", "sustentable"],
+    "sustentable": ["karun", "sustentable"],
 }
 
 
@@ -340,7 +350,7 @@ async def advisor_chat(
     # Filter meaningful product keywords excluding stop words and budget qualifiers
     meaningful_words = [
         w for w in raw_words
-        if len(w) >= 3 and w not in OPTICAL_STOP_WORDS and w not in BUDGET_CHEAP_KEYWORDS and w not in BUDGET_EXPENSIVE_KEYWORDS
+        if len(w) >= 2 and w not in OPTICAL_STOP_WORDS and w not in BUDGET_CHEAP_KEYWORDS and w not in BUDGET_EXPENSIVE_KEYWORDS
     ]
 
     # Auto-detect category from domain intent if not provided
@@ -379,6 +389,7 @@ async def advisor_chat(
     elif query_vector and settings.DATABASE_URL.startswith("postgresql"):
         stmt = stmt.order_by(Product.embedding.cosine_distance(query_vector)).limit(30)
     else:
+        # Fallback: if budget intent or generic query, return top active items
         stmt = stmt.order_by(Product.updated_at.desc()).limit(50)
 
     res = await session.execute(stmt)
@@ -394,6 +405,12 @@ async def advisor_chat(
         )
         res_fb = await session.execute(fallback_stmt)
         products = res_fb.scalars().all()
+    
+    # If still no products, fallback to global catalog (so the user always gets best available alternatives)
+    if not products:
+        global_fallback = select(Product).options(selectinload(Product.price_snapshots)).limit(50)
+        res_gf = await session.execute(global_fallback)
+        products = res_gf.scalars().all()
     mapped_products = [_map_product_read(p) for p in products]
 
     # Sort all matching products by price or relevance first
