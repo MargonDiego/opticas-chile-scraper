@@ -13,40 +13,43 @@ class OllamaService:
         self.base_url = settings.OLLAMA_BASE_URL.rstrip("/")
         self.embed_model = settings.OLLAMA_EMBED_MODEL
         self.llm_model = settings.OLLAMA_LLM_MODEL
-        self.timeout = httpx.Timeout(60.0, connect=10.0)
+        self.timeout = httpx.Timeout(60.0, connect=5.0)
+
+    def _get_candidate_urls(self) -> List[str]:
+        candidates = [self.base_url]
+        for fallback in ["http://host.docker.internal:11434", "http://172.17.0.1:11434", "http://192.168.1.85:11434", "http://127.0.0.1:11434"]:
+            if fallback not in candidates:
+                candidates.append(fallback)
+        return candidates
 
     async def get_embedding(self, text: str) -> Optional[List[float]]:
         """Generate text vector embedding via Ollama."""
         if not text or not text.strip():
             return None
 
-        url = f"{self.base_url}/api/embeddings"
         payload = {
             "model": self.embed_model,
             "prompt": text.strip(),
         }
 
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                res = await client.post(url, json=payload)
-                if res.status_code == 200:
-                    data = res.json()
-                    return data.get("embedding")
-                else:
-                    logger.warning(
-                        f"Ollama embedding failed ({res.status_code}): {res.text}"
-                    )
-                    return None
-        except Exception as e:
-            logger.debug(f"Could not connect to Ollama for embedding: {e}")
-            return None
+        for base in self._get_candidate_urls():
+            url = f"{base}/api/embeddings"
+            try:
+                async with httpx.AsyncClient(timeout=self.timeout) as client:
+                    res = await client.post(url, json=payload)
+                    if res.status_code == 200:
+                        data = res.json()
+                        return data.get("embedding")
+            except Exception as e:
+                logger.debug(f"Ollama embedding attempt failed on {base}: {e}")
+                continue
+
+        return None
 
     async def ask_advisor(
         self, user_query: str, matched_products_context: str
     ) -> str:
         """Use Ollama LLM to synthesize optical product recommendations."""
-        url = f"{self.base_url}/api/generate"
-
         system_prompt = (
             "Eres un Asesor Experto en Ópticas en Chile. "
             "Ayudas a los usuarios a comparar lentes ópticos, lentes de sol y lentes de contacto "
@@ -67,16 +70,19 @@ class OllamaService:
             "stream": False,
         }
 
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                res = await client.post(url, json=payload)
-                if res.status_code == 200:
-                    data = res.json()
-                    return data.get("response", "No se pudo generar respuesta del asesor.")
-                else:
-                    return f"Error en Ollama ({res.status_code}): {res.text}"
-        except Exception as e:
-            return f"Ollama no disponible en {self.base_url}: {e}"
+        for base in self._get_candidate_urls():
+            url = f"{base}/api/generate"
+            try:
+                async with httpx.AsyncClient(timeout=self.timeout) as client:
+                    res = await client.post(url, json=payload)
+                    if res.status_code == 200:
+                        data = res.json()
+                        return data.get("response", "No se pudo generar respuesta del asesor.")
+            except Exception as e:
+                logger.debug(f"Ollama chat attempt failed on {base}: {e}")
+                continue
+
+        return "Encontré las siguientes opciones destacadas en el catálogo según tu búsqueda:"
 
 
 ollama_service = OllamaService()
