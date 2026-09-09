@@ -8,159 +8,63 @@ logger = logging.getLogger(__name__)
 
 
 class RotterKraussScraper(BaseOpticalScraper):
-    """Scraper adapter for Rotter & Krauss (ryk.cl / rotterandkrauss.cl)."""
+    """Scraper adapter for Rotter & Krauss (ryk.cl)."""
 
     def __init__(self):
-        super().__init__(store_name="ryk", base_url="https://www.rotterandkrauss.cl")
+        super().__init__(store_name="ryk", base_url="https://www.ryk.cl")
 
     async def scrape_catalog(
         self, max_pages: Optional[int] = None
     ) -> AsyncGenerator[ScrapedItem, None]:
-        limit_pages = max_pages or 5
+        limit_pages = max_pages or 3
+        categories = [
+            "/lentes-de-contacto",
+            "/lentes-de-contacto?prefn1=ryk_visualCondition&prefv1=Miop%c3%ada%20e%20Hipermetrop%c3%ada",
+            "/lentes-de-contacto?prefn1=ryk_visualCondition&prefv1=Astigmatismo",
+        ]
+
         async with await self.get_client() as client:
-            # 1. Attempt Shopify products.json or VTEX catalog API
-            for page in range(1, limit_pages + 1):
-                # Try Shopify endpoint
-                shopify_url = f"{self.base_url}/products.json?limit=50&page={page}"
+            for cat_path in categories[:limit_pages]:
+                url = f"{self.base_url}{cat_path}"
                 try:
-                    res = await client.get(shopify_url)
+                    res = await client.get(url)
                     if res.status_code == 200:
-                        data = res.json()
-                        products = data.get("products", [])
-                        if not products:
-                            break
-                        for prod in products:
-                            item = self._parse_shopify_product(prod)
+                        soup = BeautifulSoup(res.text, "lxml")
+                        cards = soup.select(".product, .product-tile, .product-item, .tile")
+                        for card in cards:
+                            item = self._parse_tile(card)
                             if item:
                                 yield item
-                    else:
-                        # Try VTEX endpoint
-                        vtex_url = f"{self.base_url}/api/catalog_system/pub/products/search?_from={(page-1)*50}&_to={page*50-1}"
-                        vtex_res = await client.get(vtex_url)
-                        if vtex_res.status_code == 200:
-                            vtex_prods = vtex_res.json()
-                            if not vtex_prods:
-                                break
-                            for prod in vtex_prods:
-                                item = self._parse_vtex_product(prod)
-                                if item:
-                                    yield item
-                        else:
-                            # HTML Fallback
-                            async for item in self._scrape_html_fallback(client, page):
-                                yield item
                 except Exception as e:
-                    logger.error(f"Error scraping Rotter & Krauss page {page}: {e}")
-                    break
+                    logger.error(f"Error scraping RyK {url}: {e}")
 
-    def _parse_shopify_product(self, prod: dict) -> Optional[ScrapedItem]:
+    def _parse_tile(self, card) -> Optional[ScrapedItem]:
         try:
-            prod_id = str(prod.get("id"))
-            title = prod.get("title", "")
-            vendor = prod.get("vendor", "Rotter & Krauss")
-            handle = prod.get("handle", "")
-            url = f"{self.base_url}/products/{handle}"
-
-            variants = prod.get("variants", [])
-            if not variants:
-                return None
-            first_var = variants[0]
-            price = clean_clp_price(first_var.get("price"))
-            compare_price = clean_clp_price(first_var.get("compare_at_price"))
-
-            price_normal = compare_price if compare_price and compare_price > price else price
-            price_discount = price if compare_price and compare_price > price else None
-
-            images = prod.get("images", [])
-            image_url = images[0].get("src") if images else None
-            in_stock = first_var.get("available", True)
-
-            return ScrapedItem(
-                store=self.store_name,
-                store_product_id=prod_id,
-                brand=vendor,
-                model_name=title,
-                category=detect_category(title + " " + prod.get("product_type", "")),
-                url=url,
-                price_normal=price_normal or 0,
-                price_discount=price_discount,
-                image_url=image_url,
-                is_in_stock=in_stock,
-            )
-        except Exception as e:
-            logger.debug(f"Error parsing R&K Shopify item: {e}")
-            return None
-
-    def _parse_vtex_product(self, prod: dict) -> Optional[ScrapedItem]:
-        try:
-            product_id = str(prod.get("productId", ""))
-            name = prod.get("productName", "")
-            brand = prod.get("brand", "Rotter & Krauss")
-            link = prod.get("link", "")
-            if not link.startswith("http"):
-                link = f"{self.base_url}{link}"
-
-            items = prod.get("items", [])
-            if not items:
-                return None
-            first_item = items[0]
-            sellers = first_item.get("sellers", [])
-            comm_offer = sellers[0].get("commertialOffer", {}) if sellers else {}
-
-            price_normal = int(comm_offer.get("ListPrice", 0) or comm_offer.get("Price", 0))
-            price_discount = int(comm_offer.get("Price", 0))
-            if price_discount == price_normal:
-                price_discount = None
-            if price_normal == 0 and price_discount:
-                price_normal = price_discount
-                price_discount = None
-
-            images = first_item.get("images", [])
-            image_url = images[0].get("imageUrl") if images else None
-            in_stock = comm_offer.get("AvailableQuantity", 0) > 0
-
-            return ScrapedItem(
-                store=self.store_name,
-                store_product_id=product_id,
-                brand=brand,
-                model_name=name,
-                category=detect_category(name),
-                url=link,
-                price_normal=price_normal,
-                price_discount=price_discount,
-                image_url=image_url,
-                is_in_stock=in_stock,
-            )
-        except Exception as e:
-            return None
-
-    async def _scrape_html_fallback(
-        self, client: httpx.AsyncClient, page: int
-    ) -> AsyncGenerator[ScrapedItem, None]:
-        url = f"{self.base_url}/collections/all?page={page}"
-        res = await client.get(url)
-        if res.status_code != 200:
-            return
-        soup = BeautifulSoup(res.text, "lxml")
-        cards = soup.select(".grid-product, .product-item, .card")
-        for card in cards:
-            title_el = card.select_one(".grid-product__title, .product-title, h3")
-            price_el = card.select_one(".grid-product__price, .price")
+            name_el = card.select_one(".pdp-link, .product-name, h2, h3, a")
+            price_el = card.select_one(".price, .sales, .value")
             link_el = card.select_one("a[href]")
-            if title_el and price_el and link_el:
-                name = title_el.text.strip()
+            img_el = card.select_one("img[src]")
+
+            if name_el and price_el and link_el:
+                name = name_el.text.strip()
                 price = clean_clp_price(price_el.text)
                 href = link_el.get("href", "")
                 if not href.startswith("http"):
                     href = f"{self.base_url}{href}"
+                image_url = img_el.get("src") if img_el else None
+
                 if price:
-                    yield ScrapedItem(
+                    return ScrapedItem(
                         store=self.store_name,
-                        store_product_id=href.split("/")[-1],
+                        store_product_id=href.split("/")[-1].split("?")[0],
                         brand=name.split()[0] if name else "Rotter & Krauss",
                         model_name=name,
                         category=detect_category(name),
                         url=href,
                         price_normal=price,
+                        image_url=image_url,
                         is_in_stock=True,
                     )
+        except Exception:
+            return None
+        return None

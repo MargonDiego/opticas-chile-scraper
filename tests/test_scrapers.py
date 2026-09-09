@@ -1,5 +1,6 @@
 import pytest
 from src.scrapers.gmo import GMOScraper
+from src.scrapers.place_vendome import PlaceVendomeScraper
 from src.scrapers.rotter_krauss import RotterKraussScraper
 from src.scrapers.registry import get_available_stores
 
@@ -13,34 +14,27 @@ def test_scraper_registry():
     assert "econopticas" in stores
 
 
-def test_gmo_parse_vtex_product():
+def test_gmo_parse_shopify_product():
     scraper = GMOScraper()
-    mock_prod = {
-        "productId": "998877",
-        "productName": "Lentes de Sol Ray-Ban Justin",
-        "brand": "Ray-Ban",
-        "link": "/ray-ban-justin/p",
-        "categories": ["/Lentes de Sol/"],
-        "items": [
+    mock_shopify = {
+        "id": 998877,
+        "title": "Lentes de Sol Ray-Ban Justin",
+        "vendor": "Ray-Ban",
+        "handle": "ray-ban-justin",
+        "product_type": "Sol",
+        "images": [{"src": "https://gmo.cl/cdn/123.jpg"}],
+        "variants": [
             {
-                "images": [{"imageUrl": "https://gmo.vteximg.com.br/123.jpg"}],
-                "sellers": [
-                    {
-                        "commertialOffer": {
-                            "ListPrice": 149990,
-                            "Price": 119990,
-                            "AvailableQuantity": 5,
-                        }
-                    }
-                ],
+                "price": "119990",
+                "compare_at_price": "149990",
+                "available": True,
             }
         ],
     }
 
-    item = scraper._parse_vtex_product(mock_prod)
+    item = scraper._parse_shopify(mock_shopify)
     assert item is not None
     assert item.store == "gmo"
-    assert item.store_product_id == "998877"
     assert item.brand == "Ray-Ban"
     assert item.price_normal == 149990
     assert item.price_discount == 119990
@@ -48,8 +42,8 @@ def test_gmo_parse_vtex_product():
     assert item.category == "sol"
 
 
-def test_rotter_krauss_parse_shopify_product():
-    scraper = RotterKraussScraper()
+def test_place_vendome_parse_shopify_product():
+    scraper = PlaceVendomeScraper()
     mock_shopify = {
         "id": 112233,
         "title": "Armazón Óptico Oakley Holbrook",
@@ -66,9 +60,9 @@ def test_rotter_krauss_parse_shopify_product():
         ],
     }
 
-    item = scraper._parse_shopify_product(mock_shopify)
+    item = scraper._parse_shopify(mock_shopify)
     assert item is not None
-    assert item.store == "ryk"
+    assert item.store == "place_vendome"
     assert item.brand == "Oakley"
     assert item.price_normal == 159990
     assert item.price_discount == 129990

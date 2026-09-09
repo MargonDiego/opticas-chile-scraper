@@ -16,98 +16,55 @@ class EconopticasScraper(BaseOpticalScraper):
     async def scrape_catalog(
         self, max_pages: Optional[int] = None
     ) -> AsyncGenerator[ScrapedItem, None]:
-        limit_pages = max_pages or 5
+        limit_pages = max_pages or 3
+        categories = ["/anteojos-de-sol", "/anteojos-opticos", "/lentes-de-contacto"]
+
         async with await self.get_client() as client:
-            for page in range(1, limit_pages + 1):
-                url = f"{self.base_url}/api/catalog_system/pub/products/search?_from={(page-1)*50}&_to={page*50-1}"
-                try:
-                    res = await client.get(url)
-                    if res.status_code == 200:
-                        products = res.json()
-                        if not products:
-                            break
-                        for prod in products:
-                            item = self._parse_vtex(prod)
-                            if item:
-                                yield item
-                    else:
-                        # Fallback to HTML
-                        async for item in self._scrape_html(client, page):
-                            yield item
-                except Exception as e:
-                    logger.error(f"Error scraping Econopticas page {page}: {e}")
-                    break
+            for cat in categories:
+                for page in range(1, limit_pages + 1):
+                    url = f"{self.base_url}{cat}?page={page}"
+                    try:
+                        res = await client.get(url)
+                        if res.status_code == 200:
+                            soup = BeautifulSoup(res.text, "lxml")
+                            cards = soup.select(".vtex-product-summary-2-x-container, .product-card, article")
+                            if not cards:
+                                break
+                            for card in cards:
+                                item = self._parse_card(card)
+                                if item:
+                                    yield item
+                    except Exception as e:
+                        logger.error(f"Error scraping Econopticas {url}: {e}")
+                        break
 
-    def _parse_vtex(self, prod: dict) -> Optional[ScrapedItem]:
+    def _parse_card(self, card) -> Optional[ScrapedItem]:
         try:
-            product_id = str(prod.get("productId", ""))
-            name = prod.get("productName", "")
-            brand = prod.get("brand", "Econopticas")
-            link = prod.get("link", "")
-            if not link.startswith("http"):
-                link = f"{self.base_url}{link}"
-
-            items = prod.get("items", [])
-            if not items:
-                return None
-            first_item = items[0]
-            sellers = first_item.get("sellers", [])
-            comm_offer = sellers[0].get("commertialOffer", {}) if sellers else {}
-
-            price_normal = int(comm_offer.get("ListPrice", 0) or comm_offer.get("Price", 0))
-            price_discount = int(comm_offer.get("Price", 0))
-            if price_discount == price_normal:
-                price_discount = None
-            if price_normal == 0 and price_discount:
-                price_normal = price_discount
-                price_discount = None
-
-            images = first_item.get("images", [])
-            image_url = images[0].get("imageUrl") if images else None
-            in_stock = comm_offer.get("AvailableQuantity", 0) > 0
-
-            return ScrapedItem(
-                store=self.store_name,
-                store_product_id=product_id,
-                brand=brand,
-                model_name=name,
-                category=detect_category(name),
-                url=link,
-                price_normal=price_normal,
-                price_discount=price_discount,
-                image_url=image_url,
-                is_in_stock=in_stock,
-            )
-        except Exception:
-            return None
-
-    async def _scrape_html(
-        self, client: httpx.AsyncClient, page: int
-    ) -> AsyncGenerator[ScrapedItem, None]:
-        url = f"{self.base_url}/lentes-de-sol?page={page}"
-        res = await client.get(url)
-        if res.status_code != 200:
-            return
-        soup = BeautifulSoup(res.text, "lxml")
-        cards = soup.select(".vtex-product-summary-2-x-container, .product-item")
-        for card in cards:
-            title_el = card.select_one(".vtex-product-summary-2-x-productBrand, h3")
-            price_el = card.select_one(".vtex-product-price-1-x-currencyInteger, .price")
+            title_el = card.select_one(".vtex-product-summary-2-x-productBrand, .product-name, h3, h2")
+            price_el = card.select_one(".vtex-product-price-1-x-currencyInteger, .price, .selling-price")
             link_el = card.select_one("a[href]")
+            img_el = card.select_one("img[src]")
+
             if title_el and price_el and link_el:
                 name = title_el.text.strip()
                 price = clean_clp_price(price_el.text)
                 href = link_el.get("href", "")
                 if not href.startswith("http"):
                     href = f"{self.base_url}{href}"
+                image_url = img_el.get("src") if img_el else None
+
                 if price:
-                    yield ScrapedItem(
+                    return ScrapedItem(
                         store=self.store_name,
-                        store_product_id=href.split("/")[-1],
+                        store_product_id=href.split("/")[-1].split("?")[0],
                         brand=name.split()[0] if name else "Econopticas",
                         model_name=name,
                         category=detect_category(name),
                         url=href,
                         price_normal=price,
+                        image_url=image_url,
                         is_in_stock=True,
                     )
+        except Exception:
+            return None
+        return None
