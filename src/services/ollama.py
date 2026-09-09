@@ -67,23 +67,25 @@ class OllamaService:
     async def ask_advisor(
         self, user_query: str, matched_products_context: str, is_cheap_intent: bool = False
     ) -> str:
-        """Use Ollama LLM to synthesize optical product recommendations quickly."""
+        """Use Ollama LLM to synthesize optical product recommendations with guardrails."""
         focus_instruction = (
-            "El cliente busca la opción más conveniente y económica. Compara las tiendas y destaca la alternativa más barata."
+            "El cliente busca precio accesible. Compara tiendas y destaca la alternativa más económica del catálogo."
             if is_cheap_intent
-            else "Recomienda la mejor opción justificando según la necesidad del cliente y comparando tiendas."
+            else "Recomienda la opción más adecuada según la necesidad del cliente y compara tiendas objetivamente."
         )
 
         prompt = (
-            "Eres un Asesor Óptico experto en Chile.\n"
-            f"Pregunta del cliente: '{user_query}'\n\n"
-            "Opciones comparadas por tienda:\n"
+            "Eres un Asesor Experto en Ópticas en Chile (GMO, Place Vendôme, Rotter & Krauss, Schilling).\n"
+            f"Consulta del cliente: '{user_query}'\n\n"
+            "Catálogo disponible verificado:\n"
             f"{matched_products_context}\n\n"
-            "Instrucciones:\n"
-            f"- {focus_instruction}\n"
-            "- Menciona la tienda, marca, modelo y precio en CLP.\n"
-            "- Responde en 2 a 3 oraciones completas y termina siempre con punto final.\n\n"
-            "Recomendación:"
+            "Reglas y Guardrails obligatorios:\n"
+            f"1. {focus_instruction}\n"
+            "2. Cita únicamente productos, tiendas y precios reales presentes en el catálogo disponible. No inventes stock ni marcas.\n"
+            "3. No des diagnósticos ni recetas médicas; si consultan por graduación o dioptrías, recuerda consultar a un oftalmólogo.\n"
+            "4. Mantén un tono profesional, neutral y objetivo. No descalifiques ninguna tienda.\n"
+            "5. Responde conciso en 2 a 3 oraciones completas con punto final.\n\n"
+            "Recomendación experta:"
         )
 
         payload = {
@@ -91,9 +93,9 @@ class OllamaService:
             "prompt": prompt,
             "stream": False,
             "options": {
-                "num_predict": 120,    # Generous budget to prevent cut-off sentences
-                "num_thread": 4,       # Full hardware threads
-                "temperature": 0.2,    # Focused yet natural
+                "num_predict": 130,    # Prevent sentence truncation
+                "num_thread": 4,       # Optimized multi-threading
+                "temperature": 0.2,    # Deterministic and fact-grounded
                 "top_k": 15,
             },
         }
