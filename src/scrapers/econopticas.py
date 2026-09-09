@@ -16,7 +16,7 @@ class EconopticasScraper(BaseOpticalScraper):
     async def scrape_catalog(
         self, max_pages: Optional[int] = None
     ) -> AsyncGenerator[ScrapedItem, None]:
-        limit_pages = max_pages or 15
+        limit_pages = max_pages or 50
         categories = [
             "/anteojos-opticos",
             "/anteojos-de-sol",
@@ -33,13 +33,13 @@ class EconopticasScraper(BaseOpticalScraper):
                             break
 
                         soup = BeautifulSoup(res.text, "lxml")
-                        items = soup.select(".product-item, .product-item-info")
+                        items = soup.select(".product-item-info, .product-item")
                         if not items:
                             break
 
                         page_has_items = False
                         for tile in items:
-                            item = self._parse_tile(tile)
+                            item = self._parse_tile(tile, cat_path)
                             if item:
                                 page_has_items = True
                                 yield item
@@ -47,11 +47,15 @@ class EconopticasScraper(BaseOpticalScraper):
                         if not page_has_items:
                             break
 
+                        next_btn = soup.select_one(".action.next")
+                        if not next_btn:
+                            break
+
                     except Exception as e:
                         logger.error(f"Error scraping Econopticas {url}: {e}")
                         break
 
-    def _parse_tile(self, tile) -> Optional[ScrapedItem]:
+    def _parse_tile(self, tile, cat_path: str = "") -> Optional[ScrapedItem]:
         try:
             link_el = tile.select_one("a.product-item-photo, .product-link a, a[href*='.html']")
             if not link_el:
@@ -101,7 +105,7 @@ class EconopticasScraper(BaseOpticalScraper):
                 else (clean_clp_price(normal_p.text) if normal_p else None)
             )
 
-            if price_discount and price_normal and price_discount == price_normal:
+            if price_discount and price_normal and price_discount >= price_normal:
                 price_discount = None
             elif price_discount and not price_normal:
                 price_normal = price_discount
@@ -117,7 +121,7 @@ class EconopticasScraper(BaseOpticalScraper):
                 store_product_id=prod_id,
                 brand=brand,
                 model_name=name,
-                category=detect_category(f"{name} {brand}"),
+                category=detect_category(f"{name} {brand}", cat_path),
                 url=href,
                 price_normal=price_normal,
                 price_discount=price_discount,
