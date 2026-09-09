@@ -54,6 +54,9 @@ class KarunScraper(BaseOpticalScraper):
             price_normal = compare_price if compare_price and compare_price > price else price
             price_discount = price if compare_price and compare_price > price else None
 
+            if not price_normal or price_normal <= 0:
+                return None
+
             images = prod.get("images", [])
             image_url = images[0].get("src") if images else None
             in_stock = first_var.get("available", True)
@@ -65,7 +68,7 @@ class KarunScraper(BaseOpticalScraper):
                 model_name=title,
                 category=detect_category(title + " " + prod.get("product_type", "")),
                 url=url,
-                price_normal=price_normal or 0,
+                price_normal=price_normal,
                 price_discount=price_discount,
                 image_url=image_url,
                 description=prod.get("body_html"),
