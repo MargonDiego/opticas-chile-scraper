@@ -263,7 +263,8 @@ OPTICAL_STOP_WORDS = {
     "recomiendame", "dame", "cual", "cuales", "mejores", "mejor", "buenos",
     "bueno", "buenas", "buena", "hay", "tienen", "algo", "tipo", "estilo", "marca", "marcas",
     "pero", "mas", "más", "menos", "de", "en", "el", "la", "los", "las",
-    "pa", "para", "piola", "weno", "buenisimo", "bakan", "bacanes", "onda", "unos"
+    "pa", "para", "piola", "weno", "buenisimo", "bakan", "bacanes", "onda", "unos",
+    "lucas", "lucas?", "luca", "mil", "pesos", "hasta", "máximo", "maximo", "menos", "presupuesto"
 }
 
 BUDGET_CHEAP_KEYWORDS = {
@@ -289,6 +290,8 @@ INTENT_CATEGORY_MAP = {
     "sol": "sol",
     "polarizados": "sol",
     "polarizado": "sol",
+    "aviador": "sol",
+    "aviator": "sol",
     "armazon": "opticos",
     "armazones": "opticos",
     "marcos": "opticos",
@@ -302,11 +305,16 @@ INTENT_CATEGORY_MAP = {
     "laburo": "opticos",
     "filtro azul": "opticos",
     "blue defense": "opticos",
+    "receta": "opticos",
+    "lectura": "opticos",
     "contacto": "contacto",
     "acuvue": "contacto",
     "biofinity": "contacto",
     "astigmatismo": "contacto",
     "miopia": "contacto",
+    "toricos": "contacto",
+    "diarios": "contacto",
+    "mensuales": "contacto",
 }
 
 INTENT_SYNONYMS = {
@@ -332,7 +340,41 @@ INTENT_SYNONYMS = {
     "ecologicas": ["karun", "sustentable"],
     "sustentables": ["karun", "sustentable"],
     "sustentable": ["karun", "sustentable"],
+    "redondos": ["round", "redondo", "circular"],
+    "cuadrados": ["square", "cuadrado", "rectangular"],
+    "negros": ["negro", "black"],
+    "dorados": ["dorado", "gold"],
+    "carey": ["havana", "carey", "tortoise"],
+    "havana": ["havana", "carey"],
+    "transparentes": ["transparente", "clear", "cristal"],
 }
+
+
+def _extract_budget_ceiling(text: str) -> Optional[int]:
+    """Extract budget ceiling in CLP from text like 'menos de 50 lucas' or 'maximo 60.000'."""
+    text_lower = text.lower()
+    
+    # Check Chilean 'lucas' slang: e.g. '50 lucas' -> 50,000
+    lucas_match = re.search(r"(\d+)\s*lucas?", text_lower)
+    if lucas_match:
+        try:
+            return int(lucas_match.group(1)) * 1000
+        except ValueError:
+            pass
+
+    # Check explicit amount with 'menos de / hasta / maximo': e.g. 'menos de 50.000', 'hasta $80000'
+    amount_match = re.search(r"(?:menos\s+de|hasta|maximo|máximo|presupuesto\s+(?:de)?)\s*\$?(\d{1,3}(?:\.\d{3})*|\d+)", text_lower)
+    if amount_match:
+        raw_num = amount_match.group(1).replace(".", "")
+        try:
+            val = int(raw_num)
+            if val < 500:  # e.g. user wrote '50 mil' or '50'
+                val *= 1000
+            return val
+        except ValueError:
+            pass
+
+    return None
 
 
 @app.post("/api/advisor/chat", response_model=AdvisorChatResponse, tags=["AI & Vector Search"], dependencies=[Depends(get_api_key)])
@@ -343,14 +385,16 @@ async def advisor_chat(
     clean_msg = req.message.lower().strip()
     raw_words = [w.strip(".,;:!?\"'()") for w in clean_msg.split()]
     
-    # Detect Budget / Price Intent (with typo tolerance)
-    is_cheap_intent = any(w in BUDGET_CHEAP_KEYWORDS or "barat" in w or "econom" in w for w in raw_words)
+    # Detect Budget / Price Intent (with typo tolerance and numeric ceiling)
+    budget_max = _extract_budget_ceiling(clean_msg)
+    is_cheap_intent = budget_max is not None or any(w in BUDGET_CHEAP_KEYWORDS or "barat" in w or "econom" in w for w in raw_words)
     is_expensive_intent = any(w in BUDGET_EXPENSIVE_KEYWORDS for w in raw_words)
 
     # Filter meaningful product keywords excluding stop words and budget qualifiers
     meaningful_words = [
         w for w in raw_words
         if len(w) >= 2 and w not in OPTICAL_STOP_WORDS and w not in BUDGET_CHEAP_KEYWORDS and w not in BUDGET_EXPENSIVE_KEYWORDS
+        and not w.isdigit()
     ]
 
     # Auto-detect category from domain intent if not provided
@@ -406,12 +450,21 @@ async def advisor_chat(
         res_fb = await session.execute(fallback_stmt)
         products = res_fb.scalars().all()
     
-    # If still no products, fallback to global catalog (so the user always gets best available alternatives)
+    # If still no products, fallback to global catalog
     if not products:
         global_fallback = select(Product).options(selectinload(Product.price_snapshots)).limit(50)
         res_gf = await session.execute(global_fallback)
         products = res_gf.scalars().all()
     mapped_products = [_map_product_read(p) for p in products]
+
+    # Filter by numeric budget ceiling if requested
+    if budget_max:
+        budget_filtered = [
+            p for p in mapped_products
+            if (p.current_price_discount or p.current_price_normal or 0) <= budget_max
+        ]
+        if budget_filtered:
+            mapped_products = budget_filtered
 
     # Sort all matching products by price or relevance first
     if is_cheap_intent:
