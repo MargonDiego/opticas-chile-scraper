@@ -1,4 +1,5 @@
-from typing import Optional
+from typing import List, Optional, Union
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -8,7 +9,12 @@ class Settings(BaseSettings):
     PORT: int = 8000
     LOG_LEVEL: str = "INFO"
 
-    # Database: Default SQLite for local dev/test; PostgreSQL+asyncpg with pgvector in Docker
+    # Cybersecurity & Authentication
+    API_KEY: Optional[str] = None
+    CORS_ORIGINS: Union[List[str], str] = ["*"]
+    ENABLE_SECURITY_HEADERS: bool = True
+
+    # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///data/opticas.db"
 
     # Scraper Settings
@@ -25,11 +31,17 @@ class Settings(BaseSettings):
     SPIDER_API_KEY: Optional[str] = None
     SPIDER_HOST: str = "http://localhost:3030"
 
-    # Ollama Service (Homelab / Coolify)
+    # Ollama Service
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_EMBED_MODEL: str = "nomic-embed-text"
     OLLAMA_LLM_MODEL: str = "qwen2.5:1.5b"
     EMBEDDING_DIMENSION: int = 768
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    def parse_cors_origins(cls, v):
+        if isinstance(v, str) and not v.startswith("["):
+            return [i.strip() for i in v.split(",") if i.strip()]
+        return v
 
     model_config = SettingsConfigDict(
         env_file=".env",

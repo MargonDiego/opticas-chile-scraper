@@ -21,7 +21,7 @@ async def test_list_stores_endpoint():
         res = await client.get("/api/stores")
         assert res.status_code == 200
         data = res.json()
-        assert len(data["stores"]) == 5
+        assert len(data["stores"]) == 7
 
 
 @pytest.mark.asyncio
