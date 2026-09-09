@@ -33,8 +33,16 @@ def clean_clp_price(raw_price: str | int | float | None) -> Optional[int]:
     if isinstance(raw_price, (int, float)):
         return int(raw_price)
 
+    # Handle float strings like '105000.00' from Shopify APIs
+    str_val = str(raw_price).strip()
+    if re.match(r"^\d+\.\d{2}$", str_val):
+        try:
+            return int(float(str_val))
+        except ValueError:
+            pass
+
     # Remove currency symbol, spaces, points (Chile uses period for thousands e.g. $149.990)
-    cleaned = re.sub(r"[^\d]", "", str(raw_price).strip())
+    cleaned = re.sub(r"[^\d]", "", str_val)
     if not cleaned:
         return None
     try:
