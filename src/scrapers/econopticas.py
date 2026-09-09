@@ -55,8 +55,20 @@ class EconopticasScraper(BaseOpticalScraper):
                     slug = href.split("/")[-1].replace(".html", "").replace("-", " ").title()
                     name = f"Lentes {slug}"
 
-                price = clean_clp_price(price_el.text)
-                image_url = img_el.get("src") if img_el else None
+                # Normalize image URL
+                image_url = None
+                if img_el:
+                    src = img_el.get("src") or img_el.get("data-src") or img_el.get("data-lazy-src") or img_el.get("data-original")
+                    if not src and img_el.get("srcset"):
+                        src = img_el.get("srcset").split(",")[0].split()[0]
+                    if src:
+                        src = src.strip()
+                        if src.startswith("//"):
+                            image_url = f"https:{src}"
+                        elif not src.startswith("http"):
+                            image_url = f"{self.base_url.rstrip('/')}/{src.lstrip('/')}"
+                        else:
+                            image_url = src
 
                 if price and name:
                     return ScrapedItem(

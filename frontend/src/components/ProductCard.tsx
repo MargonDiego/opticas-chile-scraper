@@ -1,7 +1,7 @@
-import React from "react";
+import React, { useState } from "react";
 import { StoreBadge } from "./StoreBadge";
 import { formatCLP } from "@/lib/utils";
-import { ExternalLink, History, Sparkles } from "lucide-react";
+import { ExternalLink, History, Sparkles, Glasses, CheckCircle2 } from "lucide-react";
 import { Button } from "./ui/button";
 
 export interface Product {
@@ -22,7 +22,33 @@ interface Props {
   onViewHistory: (id: string) => void;
 }
 
+function resolveImageUrl(url?: string, store?: string): string | undefined {
+  if (!url || typeof url !== "string") return undefined;
+  const trimmed = url.trim();
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
+  if (trimmed.startsWith("//")) return `https:${trimmed}`;
+  
+  const storeHosts: Record<string, string> = {
+    ryk: "https://www.ryk.cl",
+    econopticas: "https://www.econopticas.cl",
+    schilling: "https://www.schilling.cl",
+    gmo: "https://www.gmo.cl",
+    place_vendome: "https://www.opv.cl",
+    karun: "https://latam.karunworld.com",
+    lentesplus: "https://www.lentesplus.com",
+  };
+
+  const host = store ? storeHosts[store.toLowerCase()] : undefined;
+  if (host) {
+    return `${host}/${trimmed.replace(/^\/+/, "")}`;
+  }
+  return trimmed;
+}
+
 export function ProductCard({ product, onViewHistory }: Props) {
+  const [imgError, setImgError] = useState(false);
+  const resolvedImgUrl = resolveImageUrl(product.image_url, product.store);
+
   const hasDiscount =
     product.current_price_discount &&
     product.current_price_normal &&
@@ -37,40 +63,47 @@ export function ProductCard({ product, onViewHistory }: Props) {
     : null;
 
   return (
-    <div className="group relative flex flex-col bg-card text-card-foreground rounded-2xl border border-border overflow-hidden hover:border-primary/50 hover:shadow-xl hover:shadow-primary/5 transition-all duration-300">
-      {/* Top badges */}
-      <div className="flex items-center justify-between p-3.5 pb-0 z-10">
+    <div className="group relative flex flex-col bg-card text-card-foreground rounded-2xl border border-border/80 hover:border-primary/40 shadow-sm hover:shadow-xl hover:shadow-primary/5 transition-all duration-300 overflow-hidden">
+      {/* Top Header / Badges */}
+      <div className="flex items-center justify-between p-3.5 pb-2 z-10">
         <StoreBadge store={product.store} />
         {hasDiscount && (
-          <span className="inline-flex items-center gap-1 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 text-xs font-bold px-2 py-0.5 rounded-full">
+          <span className="inline-flex items-center gap-1 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 text-[11px] font-bold px-2 py-0.5 rounded-full">
             <Sparkles className="w-3 h-3" /> -{discountPct}%
           </span>
         )}
       </div>
 
-      {/* Image Container */}
-      <div className="relative aspect-square w-full p-6 flex items-center justify-center bg-white dark:bg-muted/10 overflow-hidden my-2">
-        {product.image_url ? (
+      {/* Image Container with robust fallback */}
+      <div className="relative aspect-[4/3] w-full p-4 flex items-center justify-center bg-white dark:bg-muted/15 overflow-hidden">
+        {resolvedImgUrl && !imgError ? (
           <img
-            src={product.image_url}
+            src={resolvedImgUrl}
             alt={product.model_name}
+            onError={() => setImgError(true)}
             className="w-full h-full object-contain transform group-hover:scale-105 transition-transform duration-300"
             loading="lazy"
           />
         ) : (
-          <div className="flex flex-col items-center justify-center text-muted-foreground gap-1">
-            <span className="text-3xl font-extrabold opacity-20">{product.brand}</span>
-            <span className="text-xs">Sin imagen</span>
+          <div className="flex flex-col items-center justify-center text-muted-foreground/60 gap-1.5 p-4 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-muted/50 flex items-center justify-center text-primary/40">
+              <Glasses className="w-6 h-6" />
+            </div>
+            <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
+              {product.brand}
+            </span>
+            <span className="text-[10px] text-muted-foreground/60">Catálogo {product.store.toUpperCase()}</span>
           </div>
         )}
       </div>
 
       {/* Details */}
       <div className="flex flex-col flex-1 p-4 pt-2">
-        <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-          {product.brand}
+        <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+          <span>{product.brand}</span>
+          <span className="text-[10px] font-medium text-muted-foreground/70">{product.category}</span>
         </div>
-        <h3 className="font-semibold text-sm line-clamp-2 mt-0.5 group-hover:text-primary transition-colors">
+        <h3 className="font-semibold text-sm line-clamp-2 mt-1 group-hover:text-primary transition-colors leading-snug">
           {product.model_name}
         </h3>
 
@@ -99,7 +132,7 @@ export function ProductCard({ product, onViewHistory }: Props) {
               variant="outline"
               size="sm"
               onClick={() => onViewHistory(product.id)}
-              className="text-xs gap-1.5 h-8 font-medium"
+              className="text-xs gap-1.5 h-8 font-medium hover:bg-muted/80"
             >
               <History className="w-3.5 h-3.5" /> Historial
             </Button>

@@ -43,7 +43,19 @@ class SchillingScraper(BaseOpticalScraper):
                                 price_lines = [l.strip() for l in price_el.text.split("\n") if l.strip()]
                                 price = clean_clp_price(price_lines[0]) if price_lines else None
                                 href = link_el.get("href", "")
-                                image_url = img_el.get("src") if img_el else None
+                                image_url = None
+                                if img_el:
+                                    src = img_el.get("src") or img_el.get("data-src") or img_el.get("data-original")
+                                    if not src and img_el.get("srcset"):
+                                        src = img_el.get("srcset").split(",")[0].split()[0]
+                                    if src:
+                                        src = src.strip()
+                                        if src.startswith("//"):
+                                            image_url = f"https:{src}"
+                                        elif not src.startswith("http"):
+                                            image_url = f"{self.base_url.rstrip('/')}/{src.lstrip('/')}"
+                                        else:
+                                            image_url = src
 
                                 if price and name and len(name) > 3 and not name.endswith("%"):
                                     yield ScrapedItem(
