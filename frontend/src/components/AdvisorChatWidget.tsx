@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { MessageSquare, Send, Sparkles, X, Bot, User, ExternalLink } from "lucide-react";
+import { Send, X, Bot, ExternalLink, HelpCircle } from "lucide-react";
 import { formatCLP } from "@/lib/utils";
 
 interface Props {
@@ -19,7 +19,7 @@ export function AdvisorChatWidget({ apiBaseUrl, apiKey }: Props) {
     {
       role: "assistant",
       content:
-        "¡Hola! Soy tu Asesor Experto en Ópticas en Chile. ¿Buscas lentes de sol, armazones ópticos o lentes de contacto con el mejor precio?",
+        "¡Hola! ¿Buscas algún modelo específico, lentes de sol, armazones o lentes de contacto al mejor precio?",
     },
   ]);
   const [input, setInput] = useState("");
@@ -50,7 +50,7 @@ export function AdvisorChatWidget({ apiBaseUrl, apiKey }: Props) {
           ...prev,
           {
             role: "assistant",
-            content: data.response || "No se pudo generar respuesta.",
+            content: data.response || "No se encontró información para esa consulta.",
             products: data.relevant_products || [],
           },
         ]);
@@ -59,7 +59,7 @@ export function AdvisorChatWidget({ apiBaseUrl, apiKey }: Props) {
           ...prev,
           {
             role: "assistant",
-            content: "Hubo un problema al consultar al Asesor IA. Verifica tu API Key.",
+            content: "No se pudo completar la consulta en este momento. Intenta nuevamente.",
           },
         ]);
       }
@@ -68,7 +68,7 @@ export function AdvisorChatWidget({ apiBaseUrl, apiKey }: Props) {
         ...prev,
         {
           role: "assistant",
-          content: "Error de conexión con el servidor Ollama.",
+          content: "Hubo un error de conexión al consultar los productos.",
         },
       ]);
     } finally {
@@ -81,24 +81,24 @@ export function AdvisorChatWidget({ apiBaseUrl, apiKey }: Props) {
       {/* Floating trigger button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="fixed bottom-6 right-6 z-40 flex items-center gap-2 bg-gradient-to-r from-primary to-indigo-600 text-white px-5 py-3 rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all duration-200"
+        className="fixed bottom-6 right-6 z-40 flex items-center gap-2 bg-primary text-primary-foreground px-5 py-3 rounded-full shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 transition-all duration-200"
       >
-        <Sparkles className="w-5 h-5 animate-pulse" />
-        <span className="font-semibold text-sm">Asesor IA</span>
+        <HelpCircle className="w-5 h-5" />
+        <span className="font-semibold text-sm">¿Ayuda para elegir?</span>
       </button>
 
       {/* Chat Drawer / Modal */}
       {isOpen && (
         <div className="fixed bottom-20 right-6 z-50 w-full max-w-md bg-card text-card-foreground border border-border rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[560px] animate-in slide-in-from-bottom-5 duration-200">
           {/* Header */}
-          <div className="flex items-center justify-between px-5 py-3.5 bg-gradient-to-r from-primary to-indigo-600 text-white">
+          <div className="flex items-center justify-between px-5 py-3.5 bg-primary text-primary-foreground">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center">
                 <Bot className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="font-semibold text-sm leading-tight">Asesor Inteligente</h4>
-                <p className="text-[11px] text-white/80">Ollama Qwen2.5 + pgvector</p>
+                <h4 className="font-semibold text-sm leading-tight">Asistente de Búsqueda</h4>
+                <p className="text-[11px] text-primary-foreground/80">Recomendaciones y comparación de modelos</p>
               </div>
             </div>
             <button
@@ -135,7 +135,7 @@ export function AdvisorChatWidget({ apiBaseUrl, apiKey }: Props) {
                     <div className="mt-3 pt-3 border-t border-border/80 space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                          MATCH // CATÁLOGO:
+                          Opciones encontradas:
                         </span>
                         <span className="font-mono text-[9.5px] text-primary font-semibold">
                           {m.products.length} productos
@@ -198,7 +198,7 @@ export function AdvisorChatWidget({ apiBaseUrl, apiKey }: Props) {
                   <div className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" />
                   <div className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:0.2s]" />
                   <div className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:0.4s]" />
-                  <span className="ml-1 text-xs">Analizando catálogo con IA...</span>
+                  <span className="ml-1 text-xs">Buscando en el catálogo...</span>
                 </div>
               </div>
             )}
@@ -210,7 +210,7 @@ export function AdvisorChatWidget({ apiBaseUrl, apiKey }: Props) {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Pregunta por un modelo, marca o presupuesto..."
+              placeholder="Escribe un modelo, marca o presupuesto..."
               className="flex-1 bg-muted/40 border border-input rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
             />
             <button

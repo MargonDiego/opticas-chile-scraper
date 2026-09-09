@@ -8,25 +8,22 @@ const apiBaseUrl = import.meta.env.PUBLIC_API_URL || "http://192.168.1.85:8008";
 const apiKey = import.meta.env.PUBLIC_API_KEY || "dB57RDrRgEPNO6VK9AGUZoNwWANPBlrGgTOqk1D28OUqy5OhetekKsqfKDDAdoHoB7BowKMniCR4Guoiqxd2uNJyiKPyXKMS4AtgmC87FbzyJmPGeG7wJDFiRfwZp6Gj";
 ---
 
-<Layout title="👓 Ópticas Chile - Comparador de Precios & Catálogo">
+<Layout title="Ópticas Chile - Comparador de Precios y Catálogo">
   <div class="space-y-8">
     {/* Hero Section */}
-    <div class="text-center max-w-3xl mx-auto space-y-3 pt-4 pb-2">
-      <div class="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 text-xs font-bold">
-        <span>⚡ 7 Cadenas Monitoreadas en Tiempo Real</span>
-      </div>
+    <div class="text-center max-w-3xl mx-auto space-y-2.5 pt-3 pb-1">
       <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight">
-        Encuentra el Mejor Precio en <span class="bg-gradient-to-r from-primary to-indigo-500 bg-clip-text text-transparent">Lentes y Ópticas de Chile</span>
+        Compara Precios en <span class="bg-gradient-to-r from-primary to-indigo-500 bg-clip-text text-transparent">Ópticas de Chile</span>
       </h2>
-      <p class="text-sm text-muted-foreground leading-relaxed">
-        Monitoreo continuo de precios, detección de ofertas reales y búsqueda semántica con IA sobre GMO, Rotter & Krauss, Schilling, Place Vendôme, Econópticas, Karün y Lentesplus.
+      <p class="text-sm text-muted-foreground leading-relaxed max-w-2xl mx-auto">
+        Monitoreo diario de precios y ofertas en GMO, Rotter & Krauss, Schilling, Place Vendôme, Econópticas, Karün y Lentesplus.
       </p>
     </div>
 
     {/* Interactive React Catalog Explorer */}
     <CatalogExplorer client:load apiBaseUrl={apiBaseUrl} apiKey={apiKey} />
 
-    {/* Floating AI Advisor Chat (Ollama Qwen2.5) */}
+    {/* Floating Advisor Chat */}
     <AdvisorChatWidget client:load apiBaseUrl={apiBaseUrl} apiKey={apiKey} />
   </div>
 </Layout>
