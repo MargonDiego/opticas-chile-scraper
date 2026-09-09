@@ -7,6 +7,7 @@ from typing import List, Optional
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -270,6 +271,13 @@ async def advisor_chat(
     if query_vector and settings.DATABASE_URL.startswith("postgresql"):
         stmt = stmt.order_by(Product.embedding.cosine_distance(query_vector)).limit(5)
     else:
+        words = [w.strip() for w in req.message.split() if len(w.strip()) >= 3]
+        if words:
+            conditions = [
+                or_(Product.model_name.ilike(f"%{w}%"), Product.brand.ilike(f"%{w}%"), Product.category.ilike(f"%{w}%"))
+                for w in words
+            ]
+            stmt = stmt.where(or_(*conditions))
         stmt = stmt.order_by(Product.updated_at.desc()).limit(5)
 
     res = await session.execute(stmt)
