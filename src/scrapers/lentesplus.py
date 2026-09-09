@@ -17,8 +17,8 @@ class LentesplusScraper(BaseOpticalScraper):
     async def scrape_catalog(
         self, max_pages: Optional[int] = None
     ) -> AsyncGenerator[ScrapedItem, None]:
-        limit_pages = max_pages or 5
-        page_size = 50
+        limit_pages = max_pages or 10
+        page_size = 100
 
         query = """
         query GetCatalogProducts($pageSize: Int!, $currentPage: Int!) {

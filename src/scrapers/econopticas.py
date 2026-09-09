@@ -16,8 +16,10 @@ class EconopticasScraper(BaseOpticalScraper):
     async def scrape_catalog(
         self, max_pages: Optional[int] = None
     ) -> AsyncGenerator[ScrapedItem, None]:
-        limit_pages = max_pages or 5
+        limit_pages = max_pages or 15
         categories = [
+            "/anteojos-opticos",
+            "/anteojos-de-sol",
             "/lentes-de-contacto",
         ]
 

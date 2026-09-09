@@ -15,10 +15,10 @@ class GMOScraper(BaseOpticalScraper):
     async def scrape_catalog(
         self, max_pages: Optional[int] = None
     ) -> AsyncGenerator[ScrapedItem, None]:
-        limit_pages = max_pages or 5
+        limit_pages = max_pages or 50
         async with await self.get_client() as client:
             for page in range(1, limit_pages + 1):
-                url = f"{self.base_url}/products.json?limit=50&page={page}"
+                url = f"{self.base_url}/products.json?limit=250&page={page}"
                 try:
                     res = await client.get(url)
                     if res.status_code == 200:

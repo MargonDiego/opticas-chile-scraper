@@ -16,11 +16,11 @@ class PlaceVendomeScraper(BaseOpticalScraper):
     async def scrape_catalog(
         self, max_pages: Optional[int] = None
     ) -> AsyncGenerator[ScrapedItem, None]:
-        limit_pages = max_pages or 5
+        limit_pages = max_pages or 50
         async with await self.get_client() as client:
             for page in range(1, limit_pages + 1):
-                # Try Shopify products.json
-                url = f"{self.base_url}/products.json?limit=50&page={page}"
+                # Try Shopify products.json with limit=250
+                url = f"{self.base_url}/products.json?limit=250&page={page}"
                 try:
                     res = await client.get(url)
                     if res.status_code == 200:
@@ -37,10 +37,15 @@ class PlaceVendomeScraper(BaseOpticalScraper):
                         vtex_url = f"{self.base_url}/api/catalog_system/pub/products/search?_from={(page-1)*50}&_to={page*50-1}"
                         vtex_res = await client.get(vtex_url)
                         if vtex_res.status_code == 200:
-                            for prod in vtex_res.json():
+                            vtex_items = vtex_res.json()
+                            if not vtex_items:
+                                break
+                            for prod in vtex_items:
                                 item = self._parse_vtex(prod)
                                 if item:
                                     yield item
+                        else:
+                            break
                 except Exception as e:
                     logger.error(f"Error scraping Place Vendome page {page}: {e}")
                     break

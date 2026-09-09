@@ -16,21 +16,27 @@ class SchillingScraper(BaseOpticalScraper):
     async def scrape_catalog(
         self, max_pages: Optional[int] = None
     ) -> AsyncGenerator[ScrapedItem, None]:
-        limit_pages = max_pages or 3
+        limit_pages = max_pages or 15
         categories = [
+            "/lentes-de-sol.html",
             "/lentes-de-contacto.html",
-            "/lentes-de-contacto/condicion-visual/miopia-e-hipermetropia.html",
-            "/lentes-de-contacto/condicion-visual/astigmatismo.html",
         ]
 
         async with await self.get_client() as client:
-            for cat in categories[:limit_pages]:
-                url = f"{self.base_url}{cat}"
-                try:
-                    res = await client.get(url)
-                    if res.status_code == 200:
+            for cat in categories:
+                for page in range(1, limit_pages + 1):
+                    url = f"{self.base_url}{cat}?p={page}"
+                    try:
+                        res = await client.get(url)
+                        if res.status_code != 200:
+                            break
+
                         soup = BeautifulSoup(res.text, "lxml")
                         cards = soup.select(".product-item-info, .product-item")
+                        if not cards:
+                            break
+
+                        page_has_items = False
                         for card in cards:
                             name_el = card.select_one(".product-item-name, a.product-item-link, strong")
                             price_el = card.select_one(".price-wrapper .price, .price-box .price, .price")
@@ -39,7 +45,6 @@ class SchillingScraper(BaseOpticalScraper):
 
                             if name_el and price_el and link_el:
                                 name = name_el.text.strip()
-                                # Clean price taking first number segment
                                 price_lines = [l.strip() for l in price_el.text.split("\n") if l.strip()]
                                 price = clean_clp_price(price_lines[0]) if price_lines else None
                                 href = link_el.get("href", "")
@@ -58,6 +63,7 @@ class SchillingScraper(BaseOpticalScraper):
                                             image_url = src
 
                                 if price and name and len(name) > 3 and not name.endswith("%"):
+                                    page_has_items = True
                                     yield ScrapedItem(
                                         store=self.store_name,
                                         store_product_id=href.split("/")[-1].replace(".html", ""),
@@ -69,5 +75,8 @@ class SchillingScraper(BaseOpticalScraper):
                                         image_url=image_url,
                                         is_in_stock=True,
                                     )
-                except Exception as e:
-                    logger.error(f"Error scraping Schilling {url}: {e}")
+                        if not page_has_items:
+                            break
+                    except Exception as e:
+                        logger.error(f"Error scraping Schilling {url}: {e}")
+                        break

@@ -16,27 +16,43 @@ class RotterKraussScraper(BaseOpticalScraper):
     async def scrape_catalog(
         self, max_pages: Optional[int] = None
     ) -> AsyncGenerator[ScrapedItem, None]:
-        limit_pages = max_pages or 3
+        limit_pages = max_pages or 15
+        page_size = 48
         categories = [
+            "/anteojos-de-sol",
             "/lentes-de-contacto",
-            "/lentes-de-contacto?prefn1=ryk_visualCondition&prefv1=Miop%c3%ada%20e%20Hipermetrop%c3%ada",
-            "/lentes-de-contacto?prefn1=ryk_visualCondition&prefv1=Astigmatismo",
+            "/anteojos-de-lujo.html",
         ]
 
         async with await self.get_client() as client:
-            for cat_path in categories[:limit_pages]:
-                url = f"{self.base_url}{cat_path}"
-                try:
-                    res = await client.get(url)
-                    if res.status_code == 200:
+            for cat_path in categories:
+                for page in range(0, limit_pages):
+                    start = page * page_size
+                    sep = "&" if "?" in cat_path else "?"
+                    url = f"{self.base_url}{cat_path}{sep}sz={page_size}&start={start}"
+                    try:
+                        res = await client.get(url)
+                        if res.status_code != 200:
+                            break
+
                         soup = BeautifulSoup(res.text, "lxml")
                         cards = soup.select(".product, .product-tile, .product-item, .tile")
+                        if not cards:
+                            break
+
+                        page_has_items = False
                         for card in cards:
                             item = self._parse_tile(card)
                             if item:
+                                page_has_items = True
                                 yield item
-                except Exception as e:
-                    logger.error(f"Error scraping RyK {url}: {e}")
+
+                        if not page_has_items:
+                            break
+
+                    except Exception as e:
+                        logger.error(f"Error scraping RyK {url}: {e}")
+                        break
 
     def _parse_tile(self, card) -> Optional[ScrapedItem]:
         try:
