@@ -43,7 +43,7 @@ export function StoreBadge({ store }: StoreBadgeProps) {
   };
 
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${config.className}`}>
+    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full font-mono text-[10.5px] font-bold uppercase tracking-wider border shadow-sm ${config.className}`}>
       {config.label}
     </span>
   );

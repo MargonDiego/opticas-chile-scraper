@@ -150,18 +150,18 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
         </form>
 
         {/* Store Filter Pills */}
-        <div className="space-y-2">
-          <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            Filtrar por Tienda:
+        <div className="space-y-2.5">
+          <div className="flex items-center gap-2 font-mono text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+            <span>FILTER // TIENDAS:</span>
           </div>
           <div className="flex flex-wrap gap-2">
             {STORES.map((s) => (
               <button
                 key={s.id}
                 onClick={() => setSelectedStore(s.id)}
-                className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all ${
+                className={`px-3 py-1.5 rounded-xl font-mono text-xs font-semibold transition-all ${
                   selectedStore === s.id
-                    ? "bg-primary text-primary-foreground shadow-sm"
+                    ? "bg-primary text-primary-foreground shadow-md shadow-primary/20 scale-[1.02]"
                     : "bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground border border-border/60"
                 }`}
               >
@@ -178,10 +178,10 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
               <button
                 key={c.id}
                 onClick={() => setSelectedCategory(c.id)}
-                className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+                className={`px-3 py-1.5 rounded-lg font-mono text-xs font-semibold transition-all ${
                   selectedCategory === c.id
-                    ? "bg-secondary text-secondary-foreground font-bold border border-primary/30"
-                    : "text-muted-foreground hover:text-foreground"
+                    ? "bg-secondary text-secondary-foreground font-bold border border-primary/40 shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/30"
                 }`}
               >
                 {c.label}
@@ -189,16 +189,16 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
             ))}
           </div>
 
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-muted-foreground font-medium">Ordenar por:</span>
+          <div className="flex items-center gap-2 font-mono text-xs">
+            <span className="text-muted-foreground font-bold text-[11px]">SORT // ORDENAR:</span>
             <select
               value={sortBy}
               onChange={(e: any) => setSortBy(e.target.value)}
-              className="bg-muted/40 border border-input rounded-lg px-2.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+              className="bg-muted/50 border border-input rounded-xl px-3 py-1.5 text-xs font-mono font-medium focus:outline-none focus:ring-1 focus:ring-primary"
             >
-              <option value="price-asc">Menor Precio</option>
-              <option value="price-desc">Mayor Precio</option>
-              <option value="discount">Mejor Descuento ($)</option>
+              <option value="price-asc">Menor Precio (CLP)</option>
+              <option value="price-desc">Mayor Precio (CLP)</option>
+              <option value="discount">Mayor Descuento ($)</option>
             </select>
           </div>
         </div>
@@ -206,15 +206,15 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
 
       {/* Catalog Grid */}
       <div>
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-4 font-mono">
           <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            Resultados ({sortedProducts.length} productos)
+            CATALOG // RESULTADOS ({sortedProducts.length} PRODUCTOS)
           </p>
           <button
             onClick={fetchProducts}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors"
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors font-semibold"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} /> Actualizar
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} /> ACTUALIZAR
           </button>
         </div>
 

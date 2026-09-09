@@ -98,29 +98,31 @@ export function ProductCard({ product, onViewHistory }: Props) {
       </div>
 
       {/* Details */}
-      <div className="flex flex-col flex-1 p-4 pt-2">
-        <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+      <div className="flex flex-col flex-1 p-4 pt-2.5">
+        <div className="flex items-center justify-between font-mono text-[10.5px] font-bold uppercase tracking-wider text-muted-foreground">
           <span>{product.brand}</span>
-          <span className="text-[10px] font-medium text-muted-foreground/70">{product.category}</span>
+          <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-muted/60 text-muted-foreground font-semibold">
+            {product.category}
+          </span>
         </div>
-        <h3 className="font-semibold text-sm line-clamp-2 mt-1 group-hover:text-primary transition-colors leading-snug">
+        <h3 className="font-display font-bold text-sm tracking-tight line-clamp-2 mt-1.5 group-hover:text-primary transition-colors leading-snug">
           {product.model_name}
         </h3>
 
         {/* Pricing */}
         <div className="mt-auto pt-4">
-          <div className="flex items-baseline gap-2">
+          <div className="flex items-baseline gap-2 font-mono">
             {hasDiscount ? (
               <>
-                <span className="text-lg font-extrabold text-emerald-600 dark:text-emerald-400">
+                <span className="text-lg font-black text-emerald-600 dark:text-emerald-400 tracking-tight">
                   {formatCLP(product.current_price_discount)}
                 </span>
-                <span className="text-xs text-muted-foreground line-through">
+                <span className="text-xs text-muted-foreground/80 line-through font-medium">
                   {formatCLP(product.current_price_normal)}
                 </span>
               </>
             ) : (
-              <span className="text-lg font-extrabold text-foreground">
+              <span className="text-lg font-black text-foreground tracking-tight">
                 {formatCLP(product.current_price_normal)}
               </span>
             )}
