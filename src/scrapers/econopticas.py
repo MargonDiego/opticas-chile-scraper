@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class EconopticasScraper(BaseOpticalScraper):
-    """Scraper adapter for Econópticas (econopticas.cl)."""
+    """Scraper adapter for Econópticas (econopticas.cl - GrandVision)."""
 
     def __init__(self):
         super().__init__(store_name="econopticas", base_url="https://www.econopticas.cl")
@@ -17,46 +17,51 @@ class EconopticasScraper(BaseOpticalScraper):
         self, max_pages: Optional[int] = None
     ) -> AsyncGenerator[ScrapedItem, None]:
         limit_pages = max_pages or 3
-        categories = ["/anteojos-de-sol", "/anteojos-opticos", "/lentes-de-contacto"]
+        categories = [
+            "/lentes-de-contacto",
+            "/lentes-de-contacto?prefn1=economic_visualCondition&prefv1=Miop%c3%ada%20e%20Hipermetrop%c3%ada",
+            "/lentes-de-contacto?prefn1=economic_visualCondition&prefv1=Astigmatismo",
+        ]
 
         async with await self.get_client() as client:
-            for cat in categories:
-                for page in range(1, limit_pages + 1):
-                    url = f"{self.base_url}{cat}?page={page}"
-                    try:
-                        res = await client.get(url)
-                        if res.status_code == 200:
-                            soup = BeautifulSoup(res.text, "lxml")
-                            cards = soup.select(".vtex-product-summary-2-x-container, .product-card, article")
-                            if not cards:
-                                break
-                            for card in cards:
-                                item = self._parse_card(card)
-                                if item:
-                                    yield item
-                    except Exception as e:
-                        logger.error(f"Error scraping Econopticas {url}: {e}")
-                        break
+            for cat_path in categories[:limit_pages]:
+                url = f"{self.base_url}{cat_path}"
+                try:
+                    res = await client.get(url)
+                    if res.status_code == 200:
+                        soup = BeautifulSoup(res.text, "lxml")
+                        tiles = soup.select(".product-tile, .product, .grid-tile")
+                        for tile in tiles:
+                            item = self._parse_tile(tile)
+                            if item:
+                                yield item
+                except Exception as e:
+                    logger.error(f"Error scraping Econopticas {url}: {e}")
 
-    def _parse_card(self, card) -> Optional[ScrapedItem]:
+    def _parse_tile(self, tile) -> Optional[ScrapedItem]:
         try:
-            title_el = card.select_one(".vtex-product-summary-2-x-productBrand, .product-name, h3, h2")
-            price_el = card.select_one(".vtex-product-price-1-x-currencyInteger, .price, .selling-price")
-            link_el = card.select_one("a[href]")
-            img_el = card.select_one("img[src]")
+            link_el = tile.select_one("a[href*='.html']")
+            price_el = tile.select_one(".price .sales .value, .sales .value, .price .sales, .price, .value")
+            img_el = tile.select_one("img")
 
-            if title_el and price_el and link_el:
-                name = title_el.text.strip()
-                price = clean_clp_price(price_el.text)
+            if link_el and price_el:
                 href = link_el.get("href", "")
                 if not href.startswith("http"):
                     href = f"{self.base_url}{href}"
+                
+                # Title from link text or href slug
+                name = link_el.text.strip()
+                if not name or len(name) < 3:
+                    slug = href.split("/")[-1].replace(".html", "").replace("-", " ").title()
+                    name = f"Lentes {slug}"
+
+                price = clean_clp_price(price_el.text)
                 image_url = img_el.get("src") if img_el else None
 
-                if price:
+                if price and name:
                     return ScrapedItem(
                         store=self.store_name,
-                        store_product_id=href.split("/")[-1].split("?")[0],
+                        store_product_id=href.split("/")[-1].replace(".html", ""),
                         brand=name.split()[0] if name else "Econopticas",
                         model_name=name,
                         category=detect_category(name),

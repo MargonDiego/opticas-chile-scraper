@@ -24,7 +24,7 @@ class SchillingScraper(BaseOpticalScraper):
         ]
 
         async with await self.get_client() as client:
-            for cat in categories:
+            for cat in categories[:limit_pages]:
                 url = f"{self.base_url}{cat}"
                 try:
                     res = await client.get(url)
@@ -32,17 +32,20 @@ class SchillingScraper(BaseOpticalScraper):
                         soup = BeautifulSoup(res.text, "lxml")
                         cards = soup.select(".product-item-info, .product-item")
                         for card in cards:
-                            link_el = card.select_one(".product-item-link, a")
-                            price_el = card.select_one(".price, .price-box")
+                            name_el = card.select_one(".product-item-name, a.product-item-link, strong")
+                            price_el = card.select_one(".price-wrapper .price, .price-box .price, .price")
+                            link_el = card.select_one("a[href*='.html']")
                             img_el = card.select_one("img")
 
-                            if link_el and price_el:
-                                name = link_el.text.strip()
-                                price = clean_clp_price(price_el.text)
+                            if name_el and price_el and link_el:
+                                name = name_el.text.strip()
+                                # Clean price taking first number segment
+                                price_lines = [l.strip() for l in price_el.text.split("\n") if l.strip()]
+                                price = clean_clp_price(price_lines[0]) if price_lines else None
                                 href = link_el.get("href", "")
                                 image_url = img_el.get("src") if img_el else None
 
-                                if price and name:
+                                if price and name and len(name) > 3 and not name.endswith("%"):
                                     yield ScrapedItem(
                                         store=self.store_name,
                                         store_product_id=href.split("/")[-1].replace(".html", ""),
