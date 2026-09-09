@@ -26,7 +26,7 @@ class OllamaService:
         self.base_url = settings.OLLAMA_BASE_URL.rstrip("/")
         self.embed_model = settings.OLLAMA_EMBED_MODEL
         self.llm_model = settings.OLLAMA_LLM_MODEL
-        self.timeout = httpx.Timeout(25.0, connect=1.2)
+        self.timeout = httpx.Timeout(55.0, connect=2.0)
         self._working_url: Optional[str] = None
 
     def _get_candidate_urls(self) -> List[str]:
@@ -52,7 +52,7 @@ class OllamaService:
         for base in self._get_candidate_urls():
             url = f"{base}/api/embeddings"
             try:
-                async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=1.0)) as client:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(8.0, connect=1.5)) as client:
                     res = await client.post(url, json=payload)
                     if res.status_code == 200:
                         self._working_url = base
@@ -69,23 +69,22 @@ class OllamaService:
     ) -> str:
         """Use Ollama LLM to synthesize optical product recommendations with guardrails."""
         focus_instruction = (
-            "El cliente busca precio accesible. Compara tiendas y destaca la alternativa más económica del catálogo."
+            "Destaca la opción más económica y compara con las otras tiendas."
             if is_cheap_intent
-            else "Recomienda la opción más adecuada según la necesidad del cliente y compara tiendas objetivamente."
+            else "Recomienda la opción más adecuada y compara tiendas objetivamente."
         )
 
         prompt = (
-            "Eres un Asesor Experto en Ópticas en Chile (GMO, Place Vendôme, Rotter & Krauss, Schilling).\n"
-            f"Consulta del cliente: '{user_query}'\n\n"
-            "Catálogo disponible verificado:\n"
+            "Eres un Asesor Experto en Ópticas en Chile.\n"
+            f"Consulta: '{user_query}'\n\n"
+            "Catálogo disponible:\n"
             f"{matched_products_context}\n\n"
-            "Reglas y Guardrails obligatorios:\n"
+            "Reglas obligatorias:\n"
             f"1. {focus_instruction}\n"
-            "2. Cita únicamente productos, tiendas y precios reales presentes en el catálogo disponible. No inventes stock ni marcas.\n"
-            "3. No des diagnósticos ni recetas médicas; si consultan por graduación o dioptrías, recuerda consultar a un oftalmólogo.\n"
-            "4. Mantén un tono profesional, neutral y objetivo. No descalifiques ninguna tienda.\n"
-            "5. Responde conciso en 2 a 3 oraciones completas con punto final.\n\n"
-            "Recomendación experta:"
+            "2. Cita únicamente productos y precios del catálogo arriba. No inventes datos.\n"
+            "3. No des diagnósticos ni recetas médicas; si consultan por graduación o síntomas, recuerda acudir a un oftalmólogo.\n"
+            "4. Responde en 2 oraciones completas y termina con punto final.\n\n"
+            "Recomendación:"
         )
 
         payload = {
@@ -93,9 +92,9 @@ class OllamaService:
             "prompt": prompt,
             "stream": False,
             "options": {
-                "num_predict": 130,    # Prevent sentence truncation
-                "num_thread": 4,       # Optimized multi-threading
-                "temperature": 0.2,    # Deterministic and fact-grounded
+                "num_predict": 90,     # Faster generation within 15-20s on CPU
+                "num_thread": 4,       # Full threads
+                "temperature": 0.2,
                 "top_k": 15,
             },
         }
