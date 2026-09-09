@@ -285,11 +285,11 @@ async def advisor_chat(
     mapped_products = [_map_product_read(p) for p in products]
 
     context_lines = []
-    for p in mapped_products:
-        price = f"${p.current_price_discount:,} CLP (Antes: ${p.current_price_normal:,})" if p.current_price_discount else f"${p.current_price_normal:,} CLP"
-        context_lines.append(f"- [{p.store.upper()}] {p.brand} {p.model_name} ({p.category}) - Precio: {price} - Link: {p.url}")
+    for p in mapped_products[:3]:
+        price = f"${p.current_price_discount:,} CLP" if p.current_price_discount else f"${p.current_price_normal:,} CLP"
+        context_lines.append(f"- {p.brand} {p.model_name} ({price} en {p.store.title()})")
 
-    context_str = "\n".join(context_lines) if context_lines else "No hay productos coincidentes cargados actualmente."
+    context_str = "\n".join(context_lines) if context_lines else "No hay productos coincidentes cargados."
     ai_response = await ollama_service.ask_advisor(req.message, context_str)
 
     return AdvisorChatResponse(

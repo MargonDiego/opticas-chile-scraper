@@ -19,11 +19,12 @@ class OllamaService:
     def _get_candidate_urls(self) -> List[str]:
         if self._working_url:
             return [self._working_url]
-        candidates = [self.base_url]
-        for fallback in ["http://192.168.1.85:11434", "http://host.docker.internal:11434", "http://172.17.0.1:11434", "http://127.0.0.1:11434"]:
-            if fallback not in candidates:
-                candidates.append(fallback)
-        return candidates
+        candidates = ["http://192.168.1.85:11434", self.base_url, "http://host.docker.internal:11434", "http://127.0.0.1:11434"]
+        unique = []
+        for c in candidates:
+            if c not in unique:
+                unique.append(c)
+        return unique
 
     async def get_embedding(self, text: str) -> Optional[List[float]]:
         """Generate text vector embedding via Ollama."""
@@ -32,13 +33,13 @@ class OllamaService:
 
         payload = {
             "model": self.embed_model,
-            "prompt": text.strip()[:200],  # Bound prompt length for fast embedding
+            "prompt": text.strip()[:150],
         }
 
         for base in self._get_candidate_urls():
             url = f"{base}/api/embeddings"
             try:
-                async with httpx.AsyncClient(timeout=self.timeout) as client:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=1.0)) as client:
                     res = await client.post(url, json=payload)
                     if res.status_code == 200:
                         self._working_url = base
@@ -55,11 +56,11 @@ class OllamaService:
     ) -> str:
         """Use Ollama LLM to synthesize optical product recommendations quickly."""
         prompt = (
-            "Eres un Asesor Experto en Ópticas en Chile. "
-            "Recomienda brevemente en 2 oraciones la mejor opción entre los productos encontrados destacando precio y calidad.\n\n"
-            f"Consulta: {user_query}\n\n"
-            f"Productos:\n{matched_products_context}\n\n"
-            "Consejo breve:"
+            "Eres un Asesor Óptico experto en Chile.\n"
+            "Recomienda en una o dos frases la mejor opción según precio y calidad:\n\n"
+            f"Consulta: {user_query}\n"
+            f"Opciones:\n{matched_products_context}\n\n"
+            "Recomendación:"
         )
 
         payload = {
@@ -67,10 +68,10 @@ class OllamaService:
             "prompt": prompt,
             "stream": False,
             "options": {
-                "num_predict": 70,     # Low token budget for fast CPU generation (< 4s)
-                "num_thread": 4,       # Use all 4 hardware threads
-                "temperature": 0.2,    # Deterministic and direct
-                "top_k": 20,
+                "num_predict": 45,     # Sub-4 second response on dual-core CPU
+                "num_thread": 4,       # Full hardware threads
+                "temperature": 0.1,    # Fast greedy sampling
+                "top_k": 10,
             },
         }
 
