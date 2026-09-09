@@ -35,10 +35,8 @@ def clean_clp_price(raw_price: str | int | float | None) -> Optional[int]:
             val = int(raw_price)
         else:
             str_val = str(raw_price).strip()
-            if "." in str_val:
-                parts = str_val.rsplit(".", 1)
-                if len(parts[1]) in (2, 4) and parts[1].isdigit():
-                    str_val = parts[0]
+            # If string ends with decimal cents like .00 or ,00 (common in APIs like Shopify)
+            str_val = re.sub(r"[.,]\d{2}$", "", str_val)
             cleaned = re.sub(r"[^\d]", "", str_val)
             if not cleaned:
                 return None
@@ -53,16 +51,16 @@ def clean_clp_price(raw_price: str | int | float | None) -> Optional[int]:
         return None
 
 
-def detect_category(text: str) -> str:
+def detect_category(text: str, fallback_text: str = "") -> str:
     """Heuristic categorization based on product titles or categories."""
-    text_lower = text.lower()
-    if any(k in text_lower for k in ["sol", "sunglasses", "polarized", "polarizado"]):
+    combined = f"{text} {fallback_text}".lower()
+    if any(k in combined for k in ["sol", "sunglasses", "polarized", "polarizado"]):
         return CategoryEnum.SOL.value
-    elif any(k in text_lower for k in ["contacto", "contact", "lentilla", "biofinity", "acuvue", "air optix", "soflens"]):
+    elif any(k in combined for k in ["contacto", "contact", "lentilla", "biofinity", "acuvue", "air optix", "soflens", "freeu", "precision 1", "dailies"]):
         return CategoryEnum.CONTACTO.value
-    elif any(k in text_lower for k in ["óptico", "optico", "receta", "armazón", "armazon", "marcos", "cristal"]):
+    elif any(k in combined for k in ["óptico", "optico", "receta", "armazón", "armazon", "marcos", "cristal", "marco", "oftálmico", "oftalmico"]):
         return CategoryEnum.OPTICOS.value
-    elif any(k in text_lower for k in ["estuche", "limpiador", "gotas", "solución", "solucion", "cordón", "paño"]):
+    elif any(k in combined for k in ["estuche", "limpiador", "gotas", "solución", "solucion", "cordón", "paño"]):
         return CategoryEnum.ACCESORIOS.value
     return CategoryEnum.OTRO.value
 
