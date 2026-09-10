@@ -3,8 +3,8 @@ import Layout from "@/layouts/Layout.astro";
 import { CatalogExplorer } from "@/components/CatalogExplorer";
 import { AdvisorChatWidget } from "@/components/AdvisorChatWidget";
 
-// Backend API configuration from env or relative path default
-const apiBaseUrl = import.meta.env.PUBLIC_API_URL !== undefined ? import.meta.env.PUBLIC_API_URL : "";
+// Backend API configuration from env or production default
+const apiBaseUrl = import.meta.env.PUBLIC_API_URL || "https://api-lentes.ste-tellega.com";
 const apiKey = import.meta.env.PUBLIC_API_KEY || "dB57RDrRgEPNO6VK9AGUZoNwWANPBlrGgTOqk1D28OUqy5OhetekKsqfKDDAdoHoB7BowKMniCR4Guoiqxd2uNJyiKPyXKMS4AtgmC87FbzyJmPGeG7wJDFiRfwZp6Gj";
 ---
 

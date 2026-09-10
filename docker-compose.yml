@@ -62,7 +62,7 @@ services:
     ports:
       - "${FRONTEND_PORT:-3002}:3001"
     environment:
-      - PUBLIC_API_URL=${PUBLIC_API_URL:-http://192.168.1.85:8008}
+      - PUBLIC_API_URL=${PUBLIC_API_URL:-https://api-lentes.ste-tellega.com}
       - PUBLIC_API_KEY=${API_KEY:-dB57RDrRgEPNO6VK9AGUZoNwWANPBlrGgTOqk1D28OUqy5OhetekKsqfKDDAdoHoB7BowKMniCR4Guoiqxd2uNJyiKPyXKMS4AtgmC87FbzyJmPGeG7wJDFiRfwZp6Gj}
 
 volumes:
