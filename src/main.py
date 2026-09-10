@@ -214,6 +214,42 @@ async def get_catalog_stats(session: AsyncSession = Depends(get_session)):
     return stats
 
 
+import difflib
+
+OPTICAL_BRAND_ALIASES = {
+    "oakely": "oakley", "aokley": "oakley", "okley": "oakley", "oakly": "oakley",
+    "rayban": "ray-ban", "ray ban": "ray-ban", "reiban": "ray-ban", "reban": "ray-ban",
+    "arnet": "arnette", "arnett": "arnette",
+    "voge": "vogue", "vog": "vogue",
+    "karun": "karün", "carun": "karün",
+    "polaroide": "polaroid",
+    "polarizdo": "polarizado", "polarizada": "polarizado", "polarizados": "polarizados",
+    "dorad": "dorado", "dorada": "dorado", "platead": "plateado", "plateada": "plateado",
+    "armazon": "armazón", "armazones": "armazón", "marcos": "marco",
+}
+
+def _expand_and_correct_query(query: str, all_brands: list[str]) -> tuple[str, list[str]]:
+    """Google-like query spelling correction and token expansion."""
+    raw_tokens = [t.strip().lower() for t in query.split() if t.strip()]
+    expanded = set(raw_tokens)
+    corrected_words = []
+
+    for t in raw_tokens:
+        corrected = t
+        if t in OPTICAL_BRAND_ALIASES:
+            corrected = OPTICAL_BRAND_ALIASES[t]
+            expanded.add(corrected)
+        elif all_brands:
+            matches = difflib.get_close_matches(t.capitalize(), all_brands, n=1, cutoff=0.75)
+            if matches:
+                corrected = matches[0].lower()
+                expanded.add(corrected)
+        corrected_words.append(corrected)
+
+    clean_corrected_query = " ".join(corrected_words)
+    return clean_corrected_query, list(expanded)
+
+
 @app.get("/api/products", response_model=List[ProductRead], tags=["Products"], dependencies=[Depends(get_api_key)])
 async def get_products(
     response: Response,
@@ -232,9 +268,13 @@ async def get_products(
 ):
     all_products, _ = await _get_cached_catalog(session)
 
-    filtered: List[ProductRead] = []
+    filtered: List[tuple[float, ProductRead]] = []
     brand_lower = brand.lower() if brand else None
-    search_lower = search.strip().lower() if search and search.strip() else None
+
+    search_tokens = []
+    if search and search.strip():
+        known_brands = list({p.brand for p in all_products if p.brand})
+        _, search_tokens = _expand_and_correct_query(search.strip(), known_brands)
 
     for mapped in all_products:
         if store and store != "all" and mapped.store != store:
@@ -243,11 +283,33 @@ async def get_products(
             continue
         if brand_lower and (not mapped.brand or brand_lower not in mapped.brand.lower()):
             continue
-        if search_lower:
+
+        score = 0.0
+        if search_tokens:
             m_name = (mapped.model_name or "").lower()
             m_brand = (mapped.brand or "").lower()
             m_desc = (mapped.description or "").lower()
-            if search_lower not in m_name and search_lower not in m_brand and search_lower not in m_desc:
+            m_cat = (mapped.category or "").lower()
+
+            matched = False
+            for tok in search_tokens:
+                if tok == m_brand or tok in m_brand:
+                    matched = True
+                    score += 100.0
+                elif tok in m_name:
+                    matched = True
+                    score += 60.0
+                elif tok in m_cat:
+                    matched = True
+                    score += 30.0
+                elif tok in m_desc:
+                    matched = True
+                    score += 15.0
+                elif len(tok) >= 4 and difflib.SequenceMatcher(None, tok, m_brand).ratio() >= 0.75:
+                    matched = True
+                    score += 80.0
+
+            if not matched:
                 continue
 
         # Stock filter
@@ -282,26 +344,30 @@ async def get_products(
             if price <= 0 or price > 100000:
                 continue
 
-        filtered.append(mapped)
+        filtered.append((score, mapped))
 
     # Sorting
-    if sort_by == "price-asc":
-        filtered.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 99999999))
+    if search_tokens and sort_by == "price-asc":
+        # When user searches, prioritize relevance score first, then price
+        filtered.sort(key=lambda item: (-item[0], item[1].current_price_discount or item[1].current_price_normal or 99999999))
+    elif sort_by == "price-asc":
+        filtered.sort(key=lambda item: (item[1].current_price_discount or item[1].current_price_normal or 99999999))
     elif sort_by == "price-desc":
-        filtered.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 0), reverse=True)
+        filtered.sort(key=lambda item: (item[1].current_price_discount or item[1].current_price_normal or 0), reverse=True)
     elif sort_by == "discount":
         def get_discount_pct(p: ProductRead) -> float:
             if p.current_price_discount and p.current_price_normal and p.current_price_discount < p.current_price_normal:
                 return (p.current_price_normal - p.current_price_discount) / p.current_price_normal
             return 0.0
-        filtered.sort(key=get_discount_pct, reverse=True)
+        filtered.sort(key=lambda item: get_discount_pct(item[1]), reverse=True)
     elif sort_by == "recent":
-        filtered.sort(key=lambda p: p.updated_at, reverse=True)
+        filtered.sort(key=lambda item: item[1].updated_at, reverse=True)
 
-    total_count = len(filtered)
+    result_products = [item[1] for item in filtered]
+    total_count = len(result_products)
     response.headers["X-Total-Count"] = str(total_count)
 
-    return filtered[offset : offset + limit]
+    return result_products[offset : offset + limit]
 
 
 @app.get("/api/products/{product_id}", response_model=ProductDetailRead, tags=["Products"], dependencies=[Depends(get_api_key)])
@@ -353,33 +419,61 @@ async def semantic_search(
     req: SemanticSearchRequest,
     session: AsyncSession = Depends(get_session),
 ):
-    query_vector = await ollama_service.get_embedding(req.query)
+    all_products, _ = await _get_cached_catalog(session)
+    known_brands = list({p.brand for p in all_products if p.brand})
 
-    stmt = select(Product).options(selectinload(Product.price_snapshots))
-    if req.store and req.store != "all":
-        stmt = stmt.where(Product.store == req.store)
-    if req.category and req.category != "all":
-        stmt = stmt.where(Product.category == req.category)
-    if req.brand:
-        stmt = stmt.where(Product.brand.ilike(f"%{req.brand}%"))
+    # 1. Google-like Typo correction and token expansion
+    corrected_query, search_tokens = _expand_and_correct_query(req.query.strip(), known_brands)
+
+    query_vector = await ollama_service.get_embedding(corrected_query)
 
     fetch_limit = max(req.limit * 3, 100)
-    if query_vector and settings.DATABASE_URL.startswith("postgresql"):
-        stmt = stmt.order_by(Product.embedding.cosine_distance(query_vector)).limit(fetch_limit)
-        res = await session.execute(stmt)
-        products = res.scalars().all()
-    else:
-        stmt = stmt.where(or_(
-            Product.model_name.ilike(f"%{req.query}%"),
-            Product.brand.ilike(f"%{req.query}%"),
-            Product.description.ilike(f"%{req.query}%"),
-        )).limit(fetch_limit)
-        res = await session.execute(stmt)
-        products = res.scalars().all()
+    vector_results_dict = {}
 
-    mapped_list: List[ProductRead] = []
-    for prod in products:
-        mapped = _map_product_read(prod)
+    if query_vector and settings.DATABASE_URL.startswith("postgresql"):
+        stmt = select(Product.id, Product.embedding.cosine_distance(query_vector).label("distance")).options(selectinload(Product.price_snapshots)).limit(fetch_limit)
+        res = await session.execute(stmt)
+        for row in res.all():
+            p_id, dist = row[0], row[1]
+            vector_results_dict[p_id] = float(dist) if dist is not None else 1.0
+
+    # 2. Score across the catalog
+    scored_products: List[tuple[float, ProductRead]] = []
+
+    for mapped in all_products:
+        if req.store and req.store != "all" and mapped.store != req.store:
+            continue
+        if req.category and req.category != "all" and mapped.category != req.category:
+            continue
+        if req.brand and (not mapped.brand or req.brand.lower() not in mapped.brand.lower()):
+            continue
+
+        # Lexical score
+        m_name = (mapped.model_name or "").lower()
+        m_brand = (mapped.brand or "").lower()
+        m_desc = (mapped.description or "").lower()
+        m_cat = (mapped.category or "").lower()
+
+        lexical_score = 0.0
+        for tok in search_tokens:
+            if tok == m_brand or tok in m_brand:
+                lexical_score += 100.0
+            elif tok in m_name:
+                lexical_score += 60.0
+            elif tok in m_cat:
+                lexical_score += 30.0
+            elif tok in m_desc:
+                lexical_score += 15.0
+            elif len(tok) >= 4 and difflib.SequenceMatcher(None, tok, m_brand).ratio() >= 0.75:
+                lexical_score += 80.0
+
+        # Vector score
+        v_dist = vector_results_dict.get(mapped.id)
+        vector_score = max(0.0, (1.0 - v_dist) * 80.0) if v_dist is not None else 0.0
+
+        total_score = lexical_score + vector_score
+        if total_score <= 0.0 and vector_results_dict and mapped.id not in vector_results_dict:
+            continue
 
         # Stock filter
         if req.in_stock is True and mapped.current_in_stock is False:
@@ -413,24 +507,26 @@ async def semantic_search(
             if price <= 0 or price > 100000:
                 continue
 
-        mapped_list.append(mapped)
+        scored_products.append((total_score, mapped))
 
     # Sorting
     if req.sort_by == "price-asc":
-        mapped_list.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 99999999))
+        scored_products.sort(key=lambda item: (-item[0], item[1].current_price_discount or item[1].current_price_normal or 99999999))
     elif req.sort_by == "price-desc":
-        mapped_list.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 0), reverse=True)
+        scored_products.sort(key=lambda item: (item[1].current_price_discount or item[1].current_price_normal or 0), reverse=True)
     elif req.sort_by == "discount":
         def get_discount_pct(p: ProductRead) -> float:
             if p.current_price_discount and p.current_price_normal and p.current_price_discount < p.current_price_normal:
                 return (p.current_price_normal - p.current_price_discount) / p.current_price_normal
             return 0.0
-        mapped_list.sort(key=get_discount_pct, reverse=True)
+        scored_products.sort(key=lambda item: get_discount_pct(item[1]), reverse=True)
     elif req.sort_by == "recent":
-        mapped_list.sort(key=lambda p: p.updated_at, reverse=True)
+        scored_products.sort(key=lambda item: item[1].updated_at, reverse=True)
+    else:
+        scored_products.sort(key=lambda item: -item[0])
 
     results = []
-    for mapped in mapped_list[:req.limit]:
+    for _, mapped in scored_products[:req.limit]:
         results.append(SemanticSearchResult(**mapped.model_dump()))
     return results
 
