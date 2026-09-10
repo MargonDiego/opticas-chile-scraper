@@ -47,6 +47,7 @@ class OllamaService:
         payload = {
             "model": self.embed_model,
             "prompt": text.strip()[:150],
+            "keep_alive": "30m",
         }
 
         for base in self._get_candidate_urls():
@@ -117,9 +118,9 @@ class OllamaService:
             "model": self.llm_model,
             "prompt": prompt,
             "stream": False,
+            "keep_alive": "30m",
             "options": {
-                "num_predict": 90,
-                "num_thread": 4,
+                "num_predict": 55,
                 "temperature": 0.1,
                 "top_k": 10,
             },
