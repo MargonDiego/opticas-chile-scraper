@@ -352,24 +352,38 @@ INTENT_SYNONYMS = {
 
 
 def _extract_budget_ceiling(text: str) -> Optional[int]:
-    """Extract budget ceiling in CLP from text like 'menos de 50 lucas' or 'maximo 60.000'."""
+    """Extract budget ceiling in CLP from text like:
+    - 'bajo los 100000', 'bajo 100000', 'bajo 100k'
+    - 'menos de 50.000', 'menos de 50 lucas'
+    - 'menor a 80000', 'menores a $80.000'
+    - 'hasta 100.000', 'hasta 100 lucas'
+    - 'maximo 60.000', 'presupuesto de 70.000'
+    """
     text_lower = text.lower()
-    
-    # Check Chilean 'lucas' slang: e.g. '50 lucas' -> 50,000
-    lucas_match = re.search(r"(\d+)\s*lucas?", text_lower)
+
+    # 1. Look for 'X lucas' or 'X k': e.g. '50 lucas' -> 50,000, '100k' -> 100,000
+    lucas_match = re.search(r"(?:menos\s+de|bajo\s+(?:los\s+)?|menor(?:es)?\s+a\s+|hasta|maximo|máximo|presupuesto\s+(?:de)?|tope\s+(?:de)?)\s*(\d+)\s*(?:lucas?|k\b)", text_lower)
     if lucas_match:
         try:
             return int(lucas_match.group(1)) * 1000
         except ValueError:
             pass
 
-    # Check explicit amount with 'menos de / hasta / maximo': e.g. 'menos de 50.000', 'hasta $80000'
-    amount_match = re.search(r"(?:menos\s+de|hasta|maximo|máximo|presupuesto\s+(?:de)?)\s*\$?(\d{1,3}(?:\.\d{3})*|\d+)", text_lower)
+    standalone_lucas = re.search(r"(\d+)\s*(?:lucas?|k\b)", text_lower)
+    if standalone_lucas and any(k in text_lower for k in ["menos", "bajo", "hasta", "maximo", "máximo", "presupuesto", "tope"]):
+        try:
+            return int(standalone_lucas.group(1)) * 1000
+        except ValueError:
+            pass
+
+    # 2. Look for numeric amounts with prefixes
+    prefix_pattern = r"(?:menos\s+de|bajo\s+(?:los\s+)?|menor(?:es)?\s+a\s+|hasta|maximo|máximo|presupuesto\s+(?:de)?|tope\s+(?:de)?)\s*\$?\s*(\d{1,3}(?:\.\d{3})+|\d+)(?:\s*(?:mil|pesos|clp))?"
+    amount_match = re.search(prefix_pattern, text_lower)
     if amount_match:
         raw_num = amount_match.group(1).replace(".", "")
         try:
             val = int(raw_num)
-            if val < 500:  # e.g. user wrote '50 mil' or '50'
+            if val < 500:
                 val *= 1000
             return val
         except ValueError:
@@ -385,16 +399,32 @@ async def advisor_chat(
 ):
     clean_msg = req.message.lower().strip()
     raw_words = [w.strip(".,;:!?\"'()") for w in clean_msg.split()]
-    
-    # Detect Budget / Price Intent (with typo tolerance and numeric ceiling)
+
+    # 1. Detect Budget Ceiling
     budget_max = _extract_budget_ceiling(clean_msg)
-    is_cheap_intent = budget_max is not None or any(w in BUDGET_CHEAP_KEYWORDS or "barat" in w or "econom" in w for w in raw_words)
+
+    # 2. Detect Stock Requirement
+    stock_keywords = ["con stock", "en stock", "que haya stock", "disponible", "disponibles", "tengan stock"]
+    requires_stock = any(k in clean_msg for k in stock_keywords)
+
+    # 3. Detect Strict Deal / Discount Intent
+    deal_keywords = [
+        "en oferta", "con oferta", "de oferta", "ofertas", "oferta",
+        "con descuento", "en descuento", "descuentos", "descuento",
+        "rebajado", "rebajados", "con rebaja", "rebaja", "rebajas",
+        "en promocion", "en promoción", "promociones",
+        "en liquidacion", "en liquidación", "liquidacion", "liquidación"
+    ]
+    requires_discount = any(k in clean_msg for k in deal_keywords)
+
+    is_cheap_intent = budget_max is not None or requires_discount or any(w in BUDGET_CHEAP_KEYWORDS or "barat" in w or "econom" in w for w in raw_words)
     is_expensive_intent = any(w in BUDGET_EXPENSIVE_KEYWORDS for w in raw_words)
 
-    # Filter meaningful product keywords excluding stop words and budget qualifiers
+    # 4. Filter meaningful product keywords
     meaningful_words = [
         w for w in raw_words
         if len(w) >= 2 and w not in OPTICAL_STOP_WORDS and w not in BUDGET_CHEAP_KEYWORDS and w not in BUDGET_EXPENSIVE_KEYWORDS
+        and w not in deal_keywords and w not in stock_keywords
         and not w.isdigit()
     ]
 
@@ -422,7 +452,7 @@ async def advisor_chat(
     if inferred_category:
         stmt = stmt.where(Product.category == inferred_category)
 
-    # If specific keyword matches exist, filter by them
+    # If specific keyword matches exist, query database
     if search_terms:
         term_conditions = []
         for term in search_terms:
@@ -430,50 +460,87 @@ async def advisor_chat(
             term_conditions.append(Product.brand.ilike(f"%{term}%"))
             term_conditions.append(Product.description.ilike(f"%{term}%"))
         stmt = stmt.where(or_(*term_conditions))
-        stmt = stmt.limit(50)
+        stmt = stmt.limit(100)
     elif query_vector and settings.DATABASE_URL.startswith("postgresql"):
-        stmt = stmt.order_by(Product.embedding.cosine_distance(query_vector)).limit(30)
+        stmt = stmt.order_by(Product.embedding.cosine_distance(query_vector)).limit(60)
     else:
-        # Fallback: if budget intent or generic query, return top active items
-        stmt = stmt.order_by(Product.updated_at.desc()).limit(50)
+        stmt = stmt.order_by(Product.updated_at.desc()).limit(100)
 
     res = await session.execute(stmt)
     products = res.scalars().all()
 
-    # If search returned nothing and category is inferred, fallback to category items
-    if not products and inferred_category:
+    # Fallback to category products if keyword search returned too few items
+    if len(products) < 5 and inferred_category:
         fallback_stmt = (
             select(Product)
             .options(selectinload(Product.price_snapshots))
             .where(Product.category == inferred_category)
-            .limit(50)
+            .limit(100)
         )
         res_fb = await session.execute(fallback_stmt)
-        products = res_fb.scalars().all()
-    
-    # If still no products, fallback to global catalog
+        fb_products = res_fb.scalars().all()
+        # Merge without duplicates
+        existing_ids = {p.id for p in products}
+        for p in fb_products:
+            if p.id not in existing_ids:
+                products.append(p)
+
     if not products:
-        global_fallback = select(Product).options(selectinload(Product.price_snapshots)).limit(50)
+        global_fallback = select(Product).options(selectinload(Product.price_snapshots)).limit(100)
         res_gf = await session.execute(global_fallback)
         products = res_gf.scalars().all()
+
     mapped_products = [_map_product_read(p) for p in products]
 
-    # Filter by numeric budget ceiling if requested
-    if budget_max:
+    # === DETERMINISTIC FILTERS ===
+
+    # 1. Filter by Stock if requested
+    if requires_stock:
+        stock_filtered = [p for p in mapped_products if p.current_in_stock is not False]
+        if stock_filtered:
+            mapped_products = stock_filtered
+
+    # 2. Filter by Strict Discount / On Sale if requested
+    if requires_discount:
+        discount_filtered = [
+            p for p in mapped_products
+            if p.current_price_discount is not None
+            and p.current_price_normal is not None
+            and p.current_price_discount < p.current_price_normal
+        ]
+        if discount_filtered:
+            mapped_products = discount_filtered
+
+    # 3. Filter by Numeric Budget Ceiling
+    if budget_max is not None:
         budget_filtered = [
             p for p in mapped_products
             if (p.current_price_discount or p.current_price_normal or 0) <= budget_max
+            and (p.current_price_discount or p.current_price_normal or 0) > 0
         ]
         if budget_filtered:
             mapped_products = budget_filtered
 
-    # Sort all matching products by price or relevance first
+    # 4. Sort by Price or Discount
     if is_cheap_intent:
         mapped_products.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 99999999))
     elif is_expensive_intent:
         mapped_products.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 0), reverse=True)
 
-    # Cross-Store Diversity Ranking: pick the best option from each distinct store first!
+    # 5. Deduplicate similar model variants to avoid repetitive recommendations
+    seen_model_keys = set()
+    deduped_products = []
+    for p in mapped_products:
+        clean_model_key = re.sub(r"[^a-zA-Z0-9]", "", p.model_name[:18].lower())
+        key = f"{p.store.lower()}_{p.brand.lower()}_{clean_model_key}"
+        if key not in seen_model_keys:
+            seen_model_keys.add(key)
+            deduped_products.append(p)
+        if len(deduped_products) >= 20:
+            break
+    mapped_products = deduped_products
+
+    # 6. Cross-Store Diversity Ranking
     store_best = {}
     store_remaining = []
     for p in mapped_products:
@@ -489,20 +556,23 @@ async def advisor_chat(
     elif is_expensive_intent:
         diverse_products.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 0), reverse=True)
 
-    # Combine diverse products across stores + top remaining products up to 5 items
     final_products = (diverse_products + store_remaining)[:5]
 
     context_lines = []
-    for p in final_products[:4]:
-        price = f"${p.current_price_discount:,} CLP" if p.current_price_discount else f"${p.current_price_normal:,} CLP"
-        context_lines.append(f"- [{p.store.upper()}] {p.brand} {p.model_name} ({price})")
+    for p in final_products:
+        if p.current_price_discount and p.current_price_normal and p.current_price_discount < p.current_price_normal:
+            price_str = f"${p.current_price_discount:,} CLP (Normal: ${p.current_price_normal:,} CLP, Descuento activo)"
+        else:
+            price_str = f"${p.current_price_normal:,} CLP"
+        stock_str = "En stock" if p.current_in_stock is not False else "Sin stock"
+        context_lines.append(f"- [{p.store.upper()}] {p.brand} {p.model_name} | Precio: {price_str} | Estado: {stock_str}")
 
     # Medical Symptom & Prescription Guardrail
     medical_terms = ["dolor", "cura", "curar", "receta", "dioptria", "dioptrías", "graduacion", "graduación", "enfermedad", "infeccion", "infección"]
     has_medical_query = any(w in medical_terms for w in raw_words) or any(t in clean_msg for t in ["me cura", "para curar", "dolor de cabeza", "receta médica"])
 
     context_str = "\n".join(context_lines) if context_lines else "No hay productos coincidentes cargados."
-    
+
     if has_medical_query:
         ai_response = (
             "Para dolores de cabeza, síntomas visuales o determinación de graduación exacta (como tu miopía), "
@@ -510,7 +580,13 @@ async def advisor_chat(
             "A continuación te comparto opciones de armazones y lentes de contacto disponibles en el catálogo para cuando cuentes con tu receta."
         )
     else:
-        ai_response = await ollama_service.ask_advisor(req.message, context_str, is_cheap_intent=is_cheap_intent)
+        ai_response = await ollama_service.ask_advisor(
+            req.message,
+            context_str,
+            is_cheap_intent=is_cheap_intent,
+            budget_max=budget_max,
+            requires_discount=requires_discount,
+        )
 
     return AdvisorChatResponse(
         response=ai_response,

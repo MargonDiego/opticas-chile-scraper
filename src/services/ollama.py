@@ -65,25 +65,40 @@ class OllamaService:
         return None
 
     async def ask_advisor(
-        self, user_query: str, matched_products_context: str, is_cheap_intent: bool = False
+        self,
+        user_query: str,
+        matched_products_context: str,
+        is_cheap_intent: bool = False,
+        budget_max: Optional[int] = None,
+        requires_discount: bool = False,
     ) -> str:
         """Use Ollama LLM to synthesize optical product recommendations with guardrails."""
+        constraints = []
+        if budget_max:
+            constraints.append(f"Presupuesto del usuario: hasta ${budget_max:,} CLP.")
+        if requires_discount:
+            constraints.append("Filtro solicitado: Solo productos con descuento activo.")
+
+        constraints_str = f"Restricciones: {' '.join(constraints)}\n" if constraints else ""
+
         focus_instruction = (
-            "Destaca la opción más económica y compara con las otras tiendas."
+            "Destaca la opción más conveniente y económica dentro del catálogo encontrado."
             if is_cheap_intent
             else "Recomienda la opción más adecuada y compara tiendas objetivamente."
         )
 
         prompt = (
             "Eres un Asesor Experto en Ópticas en Chile.\n"
-            f"Consulta: '{user_query}'\n\n"
-            "Catálogo disponible:\n"
+            f"Consulta del usuario: '{user_query}'\n"
+            f"{constraints_str}"
+            "Catálogo de productos encontrados:\n"
             f"{matched_products_context}\n\n"
             "Reglas obligatorias:\n"
             f"1. {focus_instruction}\n"
-            "2. Cita únicamente productos y precios del catálogo arriba. No inventes datos.\n"
-            "3. No des diagnósticos ni recetas médicas; si consultan por graduación o síntomas, recuerda acudir a un oftalmólogo.\n"
-            "4. Responde en 2 oraciones completas y termina con punto final.\n\n"
+            "2. Usa ÚNICAMENTE los nombres, marcas y precios exactos del catálogo listado arriba. NUNCA inventes o alteres precios o cifras.\n"
+            "3. Si mencionas el precio, escribe la cifra exacta en pesos chilenos ($ CLP).\n"
+            "4. No des diagnósticos ni recetas médicas.\n"
+            "5. Responde de forma concisa y directa en 2 oraciones completas y termina con punto final.\n\n"
             "Recomendación:"
         )
 
@@ -92,10 +107,10 @@ class OllamaService:
             "prompt": prompt,
             "stream": False,
             "options": {
-                "num_predict": 90,     # Faster generation within 15-20s on CPU
-                "num_thread": 4,       # Full threads
-                "temperature": 0.2,
-                "top_k": 15,
+                "num_predict": 90,
+                "num_thread": 4,
+                "temperature": 0.1,
+                "top_k": 10,
             },
         }
 
@@ -107,7 +122,7 @@ class OllamaService:
                     if res.status_code == 200:
                         self._working_url = base
                         raw_ans = res.json().get("response", "")
-                        return _clean_trailing_sentence(raw_ans) if raw_ans else "Opciones encontradas en catálogo:"
+                        return _clean_trailing_sentence(raw_ans) if raw_ans else "Encontré las siguientes opciones destacadas en el catálogo:"
             except Exception as e:
                 logger.debug(f"Ollama chat attempt failed on {base}: {e}")
                 continue
