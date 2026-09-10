@@ -1,50 +1,60 @@
 import React from "react";
-import { Badge } from "./ui/badge";
 
 interface StoreBadgeProps {
   store: string;
 }
 
-const STORE_CONFIG: Record<string, { label: string; className: string }> = {
+const STORE_CONFIG: Record<string, { label: string; dotColor: string; className: string }> = {
   gmo: {
-    label: "GMO Chile",
-    className: "bg-emerald-600/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30",
+    label: "GMO",
+    dotColor: "bg-emerald-500",
+    className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25",
   },
   place_vendome: {
     label: "Place Vendôme",
-    className: "bg-purple-600/15 text-purple-700 dark:text-purple-400 border-purple-500/30",
+    dotColor: "bg-purple-500",
+    className: "bg-purple-500/10 text-purple-600 dark:text-purple-300 border-purple-500/25",
   },
   ryk: {
     label: "Rotter & Krauss",
-    className: "bg-blue-600/15 text-blue-700 dark:text-blue-400 border-blue-500/30",
+    dotColor: "bg-blue-500",
+    className: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/25",
   },
   schilling: {
-    label: "Ópticas Schilling",
-    className: "bg-indigo-600/15 text-indigo-700 dark:text-indigo-400 border-indigo-500/30",
+    label: "Schilling",
+    dotColor: "bg-indigo-500",
+    className: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/25",
   },
   econopticas: {
     label: "Econópticas",
-    className: "bg-amber-600/15 text-amber-700 dark:text-amber-400 border-amber-500/30",
+    dotColor: "bg-amber-500",
+    className: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25",
   },
   karun: {
-    label: "Karün Chile",
-    className: "bg-teal-600/15 text-teal-700 dark:text-teal-400 border-teal-500/30",
+    label: "Karün",
+    dotColor: "bg-teal-500",
+    className: "bg-teal-500/10 text-teal-600 dark:text-teal-400 border-teal-500/25",
   },
   lentesplus: {
     label: "Lentesplus",
-    className: "bg-cyan-600/15 text-cyan-700 dark:text-cyan-400 border-cyan-500/30",
+    dotColor: "bg-cyan-500",
+    className: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/25",
   },
 };
 
 export function StoreBadge({ store }: StoreBadgeProps) {
   const config = STORE_CONFIG[store.toLowerCase()] || {
     label: store.toUpperCase(),
-    className: "bg-slate-500/15 text-slate-700 border-slate-500/30",
+    dotColor: "bg-slate-400",
+    className: "bg-muted/60 text-muted-foreground border-border/80",
   };
 
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full font-mono text-[10.5px] font-bold uppercase tracking-wider border shadow-sm ${config.className}`}>
-      {config.label}
+    <span
+      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full font-mono text-[10px] font-bold uppercase tracking-wider border shadow-xs transition-colors ${config.className}`}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${config.dotColor}`} />
+      <span>{config.label}</span>
     </span>
   );
 }
