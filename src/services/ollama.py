@@ -69,33 +69,42 @@ class OllamaService:
         user_query: str,
         matched_products_context: str,
         is_cheap_intent: bool = False,
+        budget_min: Optional[int] = None,
         budget_max: Optional[int] = None,
+        detected_brand: Optional[str] = None,
         requires_discount: bool = False,
     ) -> str:
         """Use Ollama LLM to synthesize optical product recommendations with guardrails."""
         constraints = []
-        if budget_max:
-            constraints.append(f"Presupuesto del usuario: hasta ${budget_max:,} CLP.")
+        if detected_brand:
+            constraints.append(f"Marca solicitada: {detected_brand}.")
+        if budget_min and budget_max:
+            constraints.append(f"Rango de precio solicitado: entre ${budget_min:,} y ${budget_max:,} CLP.")
+        elif budget_max:
+            constraints.append(f"Presupuesto máximo: hasta ${budget_max:,} CLP.")
+        elif budget_min:
+            constraints.append(f"Presupuesto mínimo: desde ${budget_min:,} CLP.")
+
         if requires_discount:
             constraints.append("Filtro solicitado: Solo productos con descuento activo.")
 
-        constraints_str = f"Restricciones: {' '.join(constraints)}\n" if constraints else ""
+        constraints_str = f"Restricciones activas: {' '.join(constraints)}\n" if constraints else ""
 
         focus_instruction = (
-            "Destaca la opción más conveniente y económica dentro del catálogo encontrado."
-            if is_cheap_intent
-            else "Recomienda la opción más adecuada y compara tiendas objetivamente."
+            "Destaca como opción principal el producto más conveniente de la lista (el primer producto del catálogo listado que cumple el presupuesto y filtros)."
+            if (is_cheap_intent or budget_min or budget_max)
+            else "Recomienda la opción más adecuada del catálogo y compara tiendas objetivamente."
         )
 
         prompt = (
             "Eres un Asesor Experto en Ópticas en Chile.\n"
             f"Consulta del usuario: '{user_query}'\n"
             f"{constraints_str}"
-            "Catálogo de productos encontrados:\n"
+            "Catálogo de productos encontrados (ya filtrados y ordenados por conveniencia):\n"
             f"{matched_products_context}\n\n"
             "Reglas obligatorias:\n"
             f"1. {focus_instruction}\n"
-            "2. Usa ÚNICAMENTE los nombres, marcas y precios exactos del catálogo listado arriba. NUNCA inventes o alteres precios o cifras.\n"
+            "2. Usa ÚNICAMENTE los nombres, marcas y precios exactos del catálogo listado arriba. NUNCA inventes productos ni alteres precios.\n"
             "3. Si mencionas el precio, escribe la cifra exacta en pesos chilenos ($ CLP).\n"
             "4. No des diagnósticos ni recetas médicas.\n"
             "5. Responde de forma concisa y directa en 2 oraciones completas y termina con punto final.\n\n"

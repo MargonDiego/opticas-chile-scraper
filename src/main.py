@@ -4,7 +4,7 @@ import json
 import logging
 import re
 from contextlib import asynccontextmanager
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -448,45 +448,93 @@ INTENT_SYNONYMS = {
 }
 
 
-def _extract_budget_ceiling(text: str) -> Optional[int]:
-    """Extract budget ceiling in CLP from text like:
-    - 'bajo los 100000', 'bajo 100000', 'bajo 100k'
-    - 'menos de 50.000', 'menos de 50 lucas'
-    - 'menor a 80000', 'menores a $80.000'
-    - 'hasta 100.000', 'hasta 100 lucas'
-    - 'maximo 60.000', 'presupuesto de 70.000'
-    """
+BRAND_ALIASES = {
+    "rayban": "Ray-Ban",
+    "ray-ban": "Ray-Ban",
+    "ray ban": "Ray-Ban",
+    "oakley": "Oakley",
+    "vogue": "Vogue",
+    "karun": "Karün",
+    "karün": "Karün",
+    "acuvue": "Acuvue",
+    "armani exchange": "Armani Exchange",
+    "armani": "Armani",
+    "michael kors": "Michael Kors",
+    "alcon": "Alcon",
+    "arnette": "Arnette",
+    "burberry": "Burberry",
+    "montini": "Montini",
+    "biofinity": "Biofinity",
+    "tecnol": "Tecnol",
+    "ralph": "Ralph",
+    "prada": "Prada",
+    "gucci": "Gucci",
+    "versace": "Versace",
+    "soflens": "SofLens",
+    "dailies": "Dailies",
+    "carrera": "Carrera",
+    "police": "Police",
+    "hugo boss": "Boss",
+    "boss": "Boss",
+}
+
+
+def _parse_amount(raw: str) -> Optional[int]:
+    if not raw:
+        return None
+    raw_clean = raw.lower().replace("$", "").replace(".", "").replace(",", "").strip()
+    if "lucas" in raw_clean or "luca" in raw_clean or raw_clean.endswith("k"):
+        num_str = re.sub(r"[^\d]", "", raw_clean)
+        if num_str:
+            return int(num_str) * 1000
+    num_str = re.sub(r"[^\d]", "", raw_clean)
+    if not num_str:
+        return None
+    val = int(num_str)
+    if val < 500:
+        val *= 1000
+    return val
+
+
+def _extract_budget_range(text: str) -> Tuple[Optional[int], Optional[int]]:
+    """Extract (min_price, max_price) in CLP from natural Spanish queries."""
     text_lower = text.lower()
 
-    # 1. Look for 'X lucas' or 'X k': e.g. '50 lucas' -> 50,000, '100k' -> 100,000
-    lucas_match = re.search(r"(?:menos\s+de|bajo\s+(?:los\s+)?|menor(?:es)?\s+a\s+|hasta|maximo|máximo|presupuesto\s+(?:de)?|tope\s+(?:de)?)\s*(\d+)\s*(?:lucas?|k\b)", text_lower)
-    if lucas_match:
-        try:
-            return int(lucas_match.group(1)) * 1000
-        except ValueError:
-            pass
+    # 1. Range: 'entre X y Y', 'de X a Y', 'desde X hasta Y'
+    range_patterns = [
+        r"(?:entre|rango\s+de)\s+\$?([0-9.,k]+(?:\s*lucas?|\s*mil)?)\s+(?:y|e|a|-)\s+\$?([0-9.,k]+(?:\s*lucas?|\s*mil)?)",
+        r"(?:desde|de)\s+\$?([0-9.,k]+(?:\s*lucas?|\s*mil)?)\s+(?:hasta|a|-)\s+\$?([0-9.,k]+(?:\s*lucas?|\s*mil)?)",
+    ]
+    for pat in range_patterns:
+        m = re.search(pat, text_lower)
+        if m:
+            min_val = _parse_amount(m.group(1))
+            max_val = _parse_amount(m.group(2))
+            if min_val and max_val:
+                if min_val > max_val:
+                    min_val, max_val = max_val, min_val
+                return min_val, max_val
 
-    standalone_lucas = re.search(r"(\d+)\s*(?:lucas?|k\b)", text_lower)
-    if standalone_lucas and any(k in text_lower for k in ["menos", "bajo", "hasta", "maximo", "máximo", "presupuesto", "tope"]):
-        try:
-            return int(standalone_lucas.group(1)) * 1000
-        except ValueError:
-            pass
+    # 2. Minimum only: 'sobre X', 'mas de X', 'mayor a X', 'desde X'
+    min_pattern = r"(?:sobre|m[aá]s\s+de|mayor(?:es)?\s+a|desde|m[ií]nimo|m[ií]nima|a\s+partir\s+de)\s+(?:los\s+|las\s+)?\$?([0-9.,k]+(?:\s*lucas?|\s*mil)?)"
+    m_min = re.search(min_pattern, text_lower)
+    min_val = _parse_amount(m_min.group(1)) if m_min else None
 
-    # 2. Look for numeric amounts with prefixes
-    prefix_pattern = r"(?:menos\s+de|bajo\s+(?:los\s+)?|menor(?:es)?\s+a\s+|hasta|maximo|máximo|presupuesto\s+(?:de)?|tope\s+(?:de)?)\s*\$?\s*(\d{1,3}(?:\.\d{3})+|\d+)(?:\s*(?:mil|pesos|clp))?"
-    amount_match = re.search(prefix_pattern, text_lower)
-    if amount_match:
-        raw_num = amount_match.group(1).replace(".", "")
-        try:
-            val = int(raw_num)
-            if val < 500:
-                val *= 1000
-            return val
-        except ValueError:
-            pass
+    # 3. Maximum only: 'menos de X', 'bajo los X', 'bajo X', 'hasta X', 'maximo X'
+    max_pattern = r"(?:menos\s+de|bajo\s+(?:los\s+|las\s+)?|menor(?:es)?\s+a|hasta\s+(?:los\s+|las\s+)?|m[aá]ximo\s+(?:de\s+)?|tope\s+(?:de\s+)?|presupuesto\s+(?:de\s+)?)\s*\$?([0-9.,k]+(?:\s*lucas?|\s*mil)?)"
+    m_max = re.search(max_pattern, text_lower)
+    max_val = _parse_amount(m_max.group(1)) if m_max else None
 
-    return None
+    if min_val or max_val:
+        return min_val, max_val
+
+    # 4. Standalone lucas/k
+    m_lucas = re.search(r"(\d+)\s*(?:lucas?|k\b)", text_lower)
+    if m_lucas:
+        val = int(m_lucas.group(1)) * 1000
+        return None, val
+
+    return None, None
 
 
 @app.post("/api/advisor/chat", response_model=AdvisorChatResponse, tags=["AI & Vector Search"], dependencies=[Depends(get_api_key)])
@@ -497,14 +545,21 @@ async def advisor_chat(
     clean_msg = req.message.lower().strip()
     raw_words = [w.strip(".,;:!?\"'()") for w in clean_msg.split()]
 
-    # 1. Detect Budget Ceiling
-    budget_max = _extract_budget_ceiling(clean_msg)
+    # 1. Detect Budget Range (min & max in CLP)
+    budget_min, budget_max = _extract_budget_range(clean_msg)
 
-    # 2. Detect Stock Requirement
+    # 2. Detect Specific Brand
+    detected_brand = None
+    for alias, formal_name in BRAND_ALIASES.items():
+        if alias in clean_msg:
+            detected_brand = formal_name
+            break
+
+    # 3. Detect Stock Requirement
     stock_keywords = ["con stock", "en stock", "que haya stock", "disponible", "disponibles", "tengan stock"]
     requires_stock = any(k in clean_msg for k in stock_keywords)
 
-    # 3. Detect Strict Deal / Discount Intent
+    # 4. Detect Strict Deal / Discount Intent
     deal_keywords = [
         "en oferta", "con oferta", "de oferta", "ofertas", "oferta",
         "con descuento", "en descuento", "descuentos", "descuento",
@@ -514,10 +569,10 @@ async def advisor_chat(
     ]
     requires_discount = any(k in clean_msg for k in deal_keywords)
 
-    is_cheap_intent = budget_max is not None or requires_discount or any(w in BUDGET_CHEAP_KEYWORDS or "barat" in w or "econom" in w for w in raw_words)
+    is_cheap_intent = budget_min is not None or budget_max is not None or requires_discount or any(w in BUDGET_CHEAP_KEYWORDS or "barat" in w or "econom" in w for w in raw_words)
     is_expensive_intent = any(w in BUDGET_EXPENSIVE_KEYWORDS for w in raw_words)
 
-    # 4. Filter meaningful product keywords
+    # 5. Filter meaningful product keywords
     meaningful_words = [
         w for w in raw_words
         if len(w) >= 2 and w not in OPTICAL_STOP_WORDS and w not in BUDGET_CHEAP_KEYWORDS and w not in BUDGET_EXPENSIVE_KEYWORDS
@@ -549,25 +604,32 @@ async def advisor_chat(
     if inferred_category:
         stmt = stmt.where(Product.category == inferred_category)
 
-    # If specific keyword matches exist, query database
-    if search_terms:
+    # Brand filter if explicitly mentioned
+    if detected_brand:
+        brand_parts = detected_brand.split("-") if "-" in detected_brand else [detected_brand]
+        brand_conditions = []
+        for bp in brand_parts:
+            brand_conditions.append(Product.brand.ilike(f"%{bp}%"))
+            brand_conditions.append(Product.model_name.ilike(f"%{bp}%"))
+        stmt = stmt.where(or_(*brand_conditions))
+    elif search_terms:
         term_conditions = []
         for term in search_terms:
             term_conditions.append(Product.model_name.ilike(f"%{term}%"))
             term_conditions.append(Product.brand.ilike(f"%{term}%"))
             term_conditions.append(Product.description.ilike(f"%{term}%"))
         stmt = stmt.where(or_(*term_conditions))
-        stmt = stmt.limit(100)
+        stmt = stmt.limit(120)
     elif query_vector and settings.DATABASE_URL.startswith("postgresql"):
-        stmt = stmt.order_by(Product.embedding.cosine_distance(query_vector)).limit(60)
+        stmt = stmt.order_by(Product.embedding.cosine_distance(query_vector)).limit(80)
     else:
-        stmt = stmt.order_by(Product.updated_at.desc()).limit(100)
+        stmt = stmt.order_by(Product.updated_at.desc()).limit(120)
 
     res = await session.execute(stmt)
     products = res.scalars().all()
 
-    # Fallback to category products if keyword search returned too few items
-    if len(products) < 5 and inferred_category:
+    # Fallback to category products ONLY IF no specific brand was requested
+    if len(products) < 5 and inferred_category and not detected_brand:
         fallback_stmt = (
             select(Product)
             .options(selectinload(Product.price_snapshots))
@@ -576,7 +638,6 @@ async def advisor_chat(
         )
         res_fb = await session.execute(fallback_stmt)
         fb_products = res_fb.scalars().all()
-        # Merge without duplicates
         existing_ids = {p.id for p in products}
         for p in fb_products:
             if p.id not in existing_ids:
@@ -589,15 +650,25 @@ async def advisor_chat(
 
     mapped_products = [_map_product_read(p) for p in products]
 
-    # === DETERMINISTIC FILTERS ===
+    # === STRICT DETERMINISTIC PIPELINE ===
 
-    # 1. Filter by Stock if requested
+    # 1. Strict Brand Matching if requested
+    if detected_brand:
+        d_lower = detected_brand.lower().replace("-", "")
+        brand_filtered = [
+            p for p in mapped_products
+            if d_lower in p.brand.lower().replace("-", "") or d_lower in p.model_name.lower().replace("-", "")
+        ]
+        if brand_filtered:
+            mapped_products = brand_filtered
+
+    # 2. Strict Stock Requirement
     if requires_stock:
         stock_filtered = [p for p in mapped_products if p.current_in_stock is not False]
         if stock_filtered:
             mapped_products = stock_filtered
 
-    # 2. Filter by Strict Discount / On Sale if requested
+    # 3. Strict Discount / Offer Filter
     if requires_discount:
         discount_filtered = [
             p for p in mapped_products
@@ -608,23 +679,28 @@ async def advisor_chat(
         if discount_filtered:
             mapped_products = discount_filtered
 
-    # 3. Filter by Numeric Budget Ceiling
-    if budget_max is not None:
-        budget_filtered = [
-            p for p in mapped_products
-            if (p.current_price_discount or p.current_price_normal or 0) <= budget_max
-            and (p.current_price_discount or p.current_price_normal or 0) > 0
-        ]
-        if budget_filtered:
-            mapped_products = budget_filtered
+    # 4. Strict Numeric Price Range (min and max)
+    if budget_min is not None or budget_max is not None:
+        range_filtered = []
+        for p in mapped_products:
+            price = p.current_price_discount or p.current_price_normal or 0
+            if price <= 0:
+                continue
+            if budget_min is not None and price < budget_min:
+                continue
+            if budget_max is not None and price > budget_max:
+                continue
+            range_filtered.append(p)
+        if range_filtered:
+            mapped_products = range_filtered
 
-    # 4. Sort by Price or Discount
-    if is_cheap_intent:
+    # 5. Sort Deterministically by Effective Price or Discount
+    if is_cheap_intent or budget_min is not None or budget_max is not None:
         mapped_products.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 99999999))
     elif is_expensive_intent:
         mapped_products.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 0), reverse=True)
 
-    # 5. Deduplicate similar model variants to avoid repetitive recommendations
+    # 6. Deduplicate similar model variants
     seen_model_keys = set()
     deduped_products = []
     for p in mapped_products:
@@ -637,7 +713,7 @@ async def advisor_chat(
             break
     mapped_products = deduped_products
 
-    # 6. Cross-Store Diversity Ranking
+    # 7. Cross-Store Diversity Ranking (Preserving best price first)
     store_best = {}
     store_remaining = []
     for p in mapped_products:
@@ -648,7 +724,7 @@ async def advisor_chat(
             store_remaining.append(p)
 
     diverse_products = list(store_best.values())
-    if is_cheap_intent:
+    if is_cheap_intent or budget_min is not None or budget_max is not None:
         diverse_products.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 99999999))
     elif is_expensive_intent:
         diverse_products.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 0), reverse=True)
@@ -681,7 +757,9 @@ async def advisor_chat(
             req.message,
             context_str,
             is_cheap_intent=is_cheap_intent,
+            budget_min=budget_min,
             budget_max=budget_max,
+            detected_brand=detected_brand,
             requires_discount=requires_discount,
         )
 
