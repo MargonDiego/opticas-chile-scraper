@@ -762,22 +762,39 @@ async def advisor_chat(
         if range_filtered:
             mapped_products = range_filtered
 
-    # 7. Adult vs Kids Prioritization (unless user specifically asked for kids)
-    wants_kids = any(k in clean_msg for k in ["niño", "niña", "niños", "niñas", "hijo", "hija", "hijos", "hijas", "kids", "junior", "juvenil", "infantil"])
-    if not wants_kids:
-        is_kids = lambda p: any(k in (p.model_name + " " + (p.description or "")).lower() for k in ["junior", "juvenil", "kids", "infantil", "niños", "niñas", "años)"])
-        adults = [p for p in mapped_products if not is_kids(p)]
-        kids = [p for p in mapped_products if is_kids(p)]
-        if adults:
-            mapped_products = adults + kids
-
-    # 8. Sort Deterministically by Effective Price or Discount
+    # 7. Sort Deterministically by Effective Price or Discount FIRST
     if is_cheap_intent or budget_min is not None or budget_max is not None:
         mapped_products.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 99999999))
     elif is_expensive_intent:
         mapped_products.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 0), reverse=True)
 
-    # 7. Deduplicate similar model variants
+    # 8. Adult vs Kids Separation (Exclude junior/kids unless specifically requested)
+    wants_kids = any(k in clean_msg for k in ["niño", "niña", "niños", "niñas", "hijo", "hija", "hijos", "hijas", "kids", "junior", "juvenil", "infantil"])
+    def _is_kids(p: ProductRead) -> bool:
+        full_text = f"{p.brand} {p.model_name} {p.description or ''}".lower()
+        if any(k in full_text for k in ["junior", "juvenil", "kids", "infantil", "niño", "niña", "niños", "niñas", "años)"]):
+            return True
+        if re.search(r"\bjr\.?\b", full_text):
+            return True
+        if re.search(r"\b0?rj\d+", full_text) or re.search(r"\b0?ry9\d+", full_text):
+            return True
+        return False
+
+    if not wants_kids:
+        adults = [p for p in mapped_products if not _is_kids(p)]
+        kids = [p for p in mapped_products if _is_kids(p)]
+        mapped_products = adults if adults else kids
+    else:
+        kids = [p for p in mapped_products if _is_kids(p)]
+        adults = [p for p in mapped_products if not _is_kids(p)]
+        mapped_products = kids if kids else adults
+
+    # 9. In-Stock Prioritization (In-stock products always appear before out-of-stock)
+    in_stock_prods = [p for p in mapped_products if p.current_in_stock is not False]
+    out_stock_prods = [p for p in mapped_products if p.current_in_stock is False]
+    mapped_products = in_stock_prods + out_stock_prods
+
+    # 10. Deduplicate similar model variants
     seen_model_keys = set()
     deduped_products = []
     for p in mapped_products:
@@ -790,7 +807,7 @@ async def advisor_chat(
             break
     mapped_products = deduped_products
 
-    # 8. Cross-Store Diversity Ranking (Preserving best price first)
+    # 11. Cross-Store Diversity Ranking (Preserving best in-stock price first)
     store_best = {}
     store_remaining = []
     for p in mapped_products:
@@ -800,13 +817,7 @@ async def advisor_chat(
         else:
             store_remaining.append(p)
 
-    diverse_products = list(store_best.values())
-    if is_cheap_intent or budget_min is not None or budget_max is not None:
-        diverse_products.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 99999999))
-    elif is_expensive_intent:
-        diverse_products.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 0), reverse=True)
-
-    final_products = (diverse_products + store_remaining)[:5]
+    final_products = (list(store_best.values()) + store_remaining)[:5]
 
     context_lines = []
     for p in final_products:
