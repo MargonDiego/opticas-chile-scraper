@@ -127,8 +127,14 @@ class ProductDetailRead(ProductRead):
 class SemanticSearchRequest(SQLModel):
     query: str
     store: Optional[str] = None
+    brand: Optional[str] = None
     category: Optional[str] = None
-    limit: int = 10
+    deal: Optional[str] = None
+    in_stock: Optional[bool] = None
+    sort_by: Optional[str] = None
+    min_price: Optional[int] = None
+    max_price: Optional[int] = None
+    limit: int = 60
 
 
 class SemanticSearchResult(ProductRead):

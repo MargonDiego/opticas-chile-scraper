@@ -334,23 +334,81 @@ async def semantic_search(
     query_vector = await ollama_service.get_embedding(req.query)
 
     stmt = select(Product).options(selectinload(Product.price_snapshots))
-    if req.store:
+    if req.store and req.store != "all":
         stmt = stmt.where(Product.store == req.store)
-    if req.category:
+    if req.category and req.category != "all":
         stmt = stmt.where(Product.category == req.category)
+    if req.brand:
+        stmt = stmt.where(Product.brand.ilike(f"%{req.brand}%"))
 
+    fetch_limit = max(req.limit * 3, 100)
     if query_vector and settings.DATABASE_URL.startswith("postgresql"):
-        stmt = stmt.order_by(Product.embedding.cosine_distance(query_vector)).limit(req.limit)
+        stmt = stmt.order_by(Product.embedding.cosine_distance(query_vector)).limit(fetch_limit)
         res = await session.execute(stmt)
         products = res.scalars().all()
     else:
-        stmt = stmt.where(Product.model_name.ilike(f"%{req.query}%")).limit(req.limit)
+        stmt = stmt.where(or_(
+            Product.model_name.ilike(f"%{req.query}%"),
+            Product.brand.ilike(f"%{req.query}%"),
+            Product.description.ilike(f"%{req.query}%"),
+        )).limit(fetch_limit)
         res = await session.execute(stmt)
         products = res.scalars().all()
 
-    results = []
+    mapped_list: List[ProductRead] = []
     for prod in products:
         mapped = _map_product_read(prod)
+
+        # Stock filter
+        if req.in_stock is True and mapped.current_in_stock is False:
+            continue
+
+        price = mapped.current_price_discount or mapped.current_price_normal or 0
+
+        # Min / Max price filter
+        if req.min_price and price < req.min_price:
+            continue
+        if req.max_price and price > req.max_price:
+            continue
+
+        # Deal filters
+        if req.deal == "disc-40":
+            if not mapped.current_price_discount or not mapped.current_price_normal:
+                continue
+            pct = ((mapped.current_price_normal - mapped.current_price_discount) / mapped.current_price_normal) * 100.0
+            if pct < 40.0:
+                continue
+        elif req.deal == "disc-20":
+            if not mapped.current_price_discount or not mapped.current_price_normal:
+                continue
+            pct = ((mapped.current_price_normal - mapped.current_price_discount) / mapped.current_price_normal) * 100.0
+            if pct < 20.0:
+                continue
+        elif req.deal == "under-50k":
+            if price <= 0 or price > 50000:
+                continue
+        elif req.deal == "under-100k":
+            if price <= 0 or price > 100000:
+                continue
+
+        mapped_list.append(mapped)
+
+    # Sorting
+    if req.sort_by == "price-asc":
+        mapped_list.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 99999999))
+    elif req.sort_by == "price-desc":
+        mapped_list.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 0), reverse=True)
+    elif req.sort_by == "discount":
+        def get_discount_pct(p: ProductRead) -> float:
+            if p.current_price_discount and p.current_price_normal and p.current_price_discount < p.current_price_normal:
+                return (p.current_price_normal - p.current_price_discount) / p.current_price_normal
+            return 0.0
+        mapped_list.sort(key=get_discount_pct, reverse=True)
+    elif req.sort_by == "recent":
+        mapped_list.sort(key=lambda p: p.updated_at, reverse=True)
+
+    results = []
+    for mapped in mapped_list[:req.limit]:
         results.append(SemanticSearchResult(**mapped.model_dump()))
     return results
 

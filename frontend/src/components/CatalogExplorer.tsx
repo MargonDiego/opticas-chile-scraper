@@ -134,6 +134,10 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
             query: search.trim(),
             store: selectedStore === "all" ? undefined : selectedStore,
             category: selectedCategory === "all" ? undefined : selectedCategory,
+            brand: selectedBrand || undefined,
+            deal: dealFilter === "all" ? undefined : dealFilter,
+            in_stock: onlyInStock ? true : undefined,
+            sort_by: sortBy,
             limit: 60,
           }),
         });
