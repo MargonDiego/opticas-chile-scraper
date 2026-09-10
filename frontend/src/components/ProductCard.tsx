@@ -219,3 +219,44 @@ export function ProductCard({ product, onViewHistory }: Props) {
     </article>
   );
 }
+
+export function ProductCardSkeleton() {
+  return (
+    <article className="group relative flex flex-col bg-card text-card-foreground rounded-2xl border border-border/80 overflow-hidden animate-pulse">
+      {/* 1. Header Specimen Skeleton */}
+      <div className="flex items-center justify-between p-3 pb-2 z-10">
+        <div className="w-24 h-5 rounded-full bg-muted/80" />
+        <div className="w-10 h-5 rounded-md bg-muted/60" />
+      </div>
+
+      {/* 2. Canvas Stage Skeleton */}
+      <div className="relative aspect-[4/3] w-full p-4 flex items-center justify-center bg-zinc-100/70 dark:bg-zinc-900/60 ring-1 ring-inset ring-black/5 dark:ring-white/5 overflow-hidden">
+        <div className="w-28 h-12 rounded-xl bg-muted/40" />
+        <div className="absolute bottom-2.5 left-2.5 w-14 h-4 rounded bg-background/90 border border-border/60" />
+      </div>
+
+      {/* 3. Details & Pricing Ledger Skeleton */}
+      <div className="flex flex-col flex-1 p-4 pt-3 space-y-3">
+        <div className="space-y-1.5">
+          <div className="w-16 h-3 rounded bg-muted/80" />
+          <div className="w-full h-4 rounded bg-muted/90" />
+          <div className="w-3/5 h-4 rounded bg-muted/70" />
+        </div>
+
+        <div className="mt-auto pt-2 border-t border-border/50 space-y-1.5">
+          <div className="flex items-baseline gap-2">
+            <div className="w-24 h-6 rounded bg-muted/90" />
+            <div className="w-14 h-3.5 rounded bg-muted/50" />
+          </div>
+          <div className="w-20 h-3 rounded bg-emerald-500/20" />
+        </div>
+
+        {/* 4. Action Buttons Skeleton */}
+        <div className="grid grid-cols-2 gap-2 pt-1">
+          <div className="h-9 rounded-xl bg-muted/60 border border-border/80" />
+          <div className="h-9 rounded-xl bg-muted/90" />
+        </div>
+      </div>
+    </article>
+  );
+}

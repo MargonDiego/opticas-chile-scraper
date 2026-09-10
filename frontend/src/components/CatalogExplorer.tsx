@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
-import { ProductCard, type Product } from "./ProductCard";
+import { ProductCard, ProductCardSkeleton, type Product } from "./ProductCard";
 import { PriceHistoryModal } from "./PriceHistoryModal";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
@@ -571,28 +571,7 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
             {[...Array(8)].map((_, i) => (
-              <div
-                key={i}
-                className="bg-card border border-border/80 rounded-2xl p-4 flex flex-col justify-between space-y-4 animate-pulse"
-              >
-                <div className="flex justify-between items-center">
-                  <div className="w-20 h-5 bg-muted rounded-full" />
-                  <div className="w-12 h-5 bg-muted rounded-md" />
-                </div>
-                <div className="w-full aspect-[4/3] bg-zinc-100 dark:bg-zinc-900 rounded-xl" />
-                <div className="space-y-2 pt-1">
-                  <div className="w-16 h-3.5 bg-muted rounded" />
-                  <div className="w-4/5 h-4 bg-muted rounded" />
-                </div>
-                <div className="pt-3 border-t border-border/50 flex items-baseline justify-between">
-                  <div className="w-24 h-6 bg-muted rounded" />
-                  <div className="w-16 h-4 bg-muted rounded" />
-                </div>
-                <div className="grid grid-cols-2 gap-2 pt-1">
-                  <div className="h-9 bg-muted rounded-xl" />
-                  <div className="h-9 bg-muted rounded-xl" />
-                </div>
-              </div>
+              <ProductCardSkeleton key={i} />
             ))}
           </div>
         ) : products.length > 0 ? (
