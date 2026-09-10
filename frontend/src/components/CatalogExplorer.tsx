@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { ProductCard, type Product } from "./ProductCard";
 import { PriceHistoryModal } from "./PriceHistoryModal";
 import { Input } from "./ui/input";
@@ -99,6 +99,10 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
   const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
+  // In-memory query cache for instant tab/filter switching
+  const cacheRef = useRef<Map<string, { products: Product[]; totalCount: number }>>(new Map());
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
   // 1. Fetch Global Stats
   const fetchStats = async () => {
     try {
@@ -115,80 +119,115 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
   };
 
   // 2. Fetch Catalog Products (Reset or Append)
-  const fetchProducts = async (isAppend: boolean = false) => {
-    if (isAppend) {
-      setLoadingMore(true);
-    } else {
-      setLoading(true);
-    }
+  const fetchProducts = useCallback(
+    async (isAppend: boolean = false) => {
+      const cacheKey = `${selectedStore}:${selectedCategory}:${selectedBrand || ""}:${dealFilter}:${onlyInStock}:${sortBy}:${semanticMode}:${search.trim()}`;
 
-    try {
-      if (semanticMode && search.trim()) {
-        const res = await fetch(`${apiBaseUrl}/api/products/search/semantic`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-API-Key": apiKey,
-          },
-          body: JSON.stringify({
-            query: search.trim(),
-            store: selectedStore === "all" ? undefined : selectedStore,
-            category: selectedCategory === "all" ? undefined : selectedCategory,
-            brand: selectedBrand || undefined,
-            deal: dealFilter === "all" ? undefined : dealFilter,
-            in_stock: onlyInStock ? true : undefined,
-            sort_by: sortBy,
-            limit: 60,
-          }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setProducts(data);
-          setTotalCount(data.length);
-        }
-      } else {
-        const offset = isAppend ? products.length : 0;
-        const params = new URLSearchParams({
-          limit: String(PAGE_SIZE),
-          offset: String(offset),
-          sort_by: sortBy,
-        });
-
-        if (selectedStore !== "all") params.append("store", selectedStore);
-        if (selectedCategory !== "all") params.append("category", selectedCategory);
-        if (selectedBrand) params.append("brand", selectedBrand);
-        if (search.trim()) params.append("search", search.trim());
-        if (dealFilter !== "all") params.append("deal", dealFilter);
-        if (onlyInStock) params.append("in_stock", "true");
-
-        const res = await fetch(`${apiBaseUrl}/api/products?${params.toString()}`, {
-          headers: { "X-API-Key": apiKey },
-        });
-
-        if (res.ok) {
-          const countHeader = res.headers.get("X-Total-Count");
-          const data = await res.json();
-
-          if (countHeader) {
-            setTotalCount(parseInt(countHeader, 10));
-          } else if (!isAppend) {
-            setTotalCount(data.length);
-          }
-
-          if (isAppend) {
-            setProducts((prev) => [...prev, ...data]);
-          } else {
-            setProducts(data);
-          }
-        }
+      if (!isAppend && cacheRef.current.has(cacheKey)) {
+        const cached = cacheRef.current.get(cacheKey)!;
+        setProducts(cached.products);
+        setTotalCount(cached.totalCount);
+        setLoading(false);
+        return;
       }
-    } catch (err) {
-      console.error("Error fetching products:", err);
-    } finally {
-      setLoading(false);
-      setLoadingMore(false);
-    }
-  };
+
+      if (isAppend) {
+        setLoadingMore(true);
+      } else {
+        setLoading(true);
+      }
+
+      try {
+        if (semanticMode && search.trim()) {
+          const res = await fetch(`${apiBaseUrl}/api/products/search/semantic`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-API-Key": apiKey,
+            },
+            body: JSON.stringify({
+              query: search.trim(),
+              store: selectedStore === "all" ? undefined : selectedStore,
+              category: selectedCategory === "all" ? undefined : selectedCategory,
+              brand: selectedBrand || undefined,
+              deal: dealFilter === "all" ? undefined : dealFilter,
+              in_stock: onlyInStock ? true : undefined,
+              sort_by: sortBy,
+              limit: 60,
+            }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setProducts(data);
+            setTotalCount(data.length);
+            cacheRef.current.set(cacheKey, { products: data, totalCount: data.length });
+          }
+        } else {
+          const offset = isAppend ? products.length : 0;
+          const params = new URLSearchParams({
+            limit: String(PAGE_SIZE),
+            offset: String(offset),
+            sort_by: sortBy,
+          });
+
+          if (selectedStore !== "all") params.append("store", selectedStore);
+          if (selectedCategory !== "all") params.append("category", selectedCategory);
+          if (selectedBrand) params.append("brand", selectedBrand);
+          if (search.trim()) params.append("search", search.trim());
+          if (dealFilter !== "all") params.append("deal", dealFilter);
+          if (onlyInStock) params.append("in_stock", "true");
+
+          const res = await fetch(`${apiBaseUrl}/api/products?${params.toString()}`, {
+            headers: { "X-API-Key": apiKey },
+          });
+
+          if (res.ok) {
+            const countHeader = res.headers.get("X-Total-Count");
+            const data: Product[] = await res.json();
+
+            let newTotal = totalCount;
+            if (countHeader) {
+              newTotal = parseInt(countHeader, 10);
+              setTotalCount(newTotal);
+            } else if (!isAppend) {
+              newTotal = data.length;
+              setTotalCount(newTotal);
+            }
+
+            if (isAppend) {
+              setProducts((prev) => {
+                const combined = [...prev, ...data];
+                cacheRef.current.set(cacheKey, { products: combined, totalCount: newTotal });
+                return combined;
+              });
+            } else {
+              setProducts(data);
+              cacheRef.current.set(cacheKey, { products: data, totalCount: newTotal });
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching products:", err);
+      } finally {
+        setLoading(false);
+        setLoadingMore(false);
+      }
+    },
+    [
+      apiBaseUrl,
+      apiKey,
+      selectedStore,
+      selectedCategory,
+      selectedBrand,
+      dealFilter,
+      onlyInStock,
+      sortBy,
+      semanticMode,
+      search,
+      products.length,
+      totalCount,
+    ]
+  );
 
   // Initial load: Stats and Products
   useEffect(() => {
@@ -199,6 +238,22 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
   useEffect(() => {
     fetchProducts(false);
   }, [selectedStore, selectedCategory, selectedBrand, dealFilter, onlyInStock, sortBy, semanticMode]);
+
+  // Automatic Infinite Scroll with IntersectionObserver
+  useEffect(() => {
+    if (!sentinelRef.current) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const first = entries[0];
+        if (first.isIntersecting && !loading && !loadingMore && products.length < totalCount && products.length > 0) {
+          fetchProducts(true);
+        }
+      },
+      { rootMargin: "400px" }
+    );
+    observer.observe(sentinelRef.current);
+    return () => observer.disconnect();
+  }, [loading, loadingMore, products.length, totalCount, fetchProducts]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -518,25 +573,24 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
             {[...Array(8)].map((_, i) => (
               <div
                 key={i}
-                className="bg-card/70 border border-border/70 rounded-2xl p-4 h-96 flex flex-col justify-between animate-pulse"
+                className="bg-card border border-border/80 rounded-2xl p-4 flex flex-col justify-between space-y-4 animate-pulse"
               >
                 <div className="flex justify-between items-center">
-                  <div className="w-20 h-5 bg-muted/80 rounded-full" />
-                  <div className="w-12 h-5 bg-muted/60 rounded-full" />
+                  <div className="w-20 h-5 bg-muted rounded-full" />
+                  <div className="w-12 h-5 bg-muted rounded-md" />
                 </div>
-                <div className="w-full h-40 bg-muted/40 rounded-xl my-2 flex items-center justify-center">
-                  <div className="w-12 h-12 rounded-full bg-muted/60" />
+                <div className="w-full aspect-[4/3] bg-zinc-100 dark:bg-zinc-900 rounded-xl" />
+                <div className="space-y-2 pt-1">
+                  <div className="w-16 h-3.5 bg-muted rounded" />
+                  <div className="w-4/5 h-4 bg-muted rounded" />
                 </div>
-                <div className="space-y-2">
-                  <div className="w-1/3 h-3.5 bg-muted/60 rounded" />
-                  <div className="w-4/5 h-4 bg-muted/80 rounded" />
+                <div className="pt-3 border-t border-border/50 flex items-baseline justify-between">
+                  <div className="w-24 h-6 bg-muted rounded" />
+                  <div className="w-16 h-4 bg-muted rounded" />
                 </div>
-                <div className="pt-2 border-t border-border/50 flex justify-between items-center">
-                  <div className="space-y-1">
-                    <div className="w-24 h-5 bg-muted/90 rounded" />
-                    <div className="w-16 h-3 bg-muted/50 rounded" />
-                  </div>
-                  <div className="w-8 h-8 rounded-lg bg-muted/60" />
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <div className="h-9 bg-muted rounded-xl" />
+                  <div className="h-9 bg-muted rounded-xl" />
                 </div>
               </div>
             ))}
@@ -553,34 +607,39 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
               ))}
             </div>
 
-            {/* Load More Button & Infinite Pagination Bar */}
-            {products.length < totalCount && (
-              <div className="flex flex-col items-center justify-center pt-4 pb-8 space-y-3">
+            {/* Infinite Scroll Sentinel & Load More Status */}
+            <div ref={sentinelRef} className="flex flex-col items-center justify-center pt-4 pb-8 space-y-3">
+              {products.length < totalCount ? (
                 <Button
                   onClick={handleLoadMore}
                   disabled={loadingMore}
-                  className="h-12 px-8 rounded-2xl font-semibold text-sm gap-2 shadow-lg shadow-primary/20 hover:scale-[1.02] transition-transform"
+                  variant="outline"
+                  className="h-11 px-6 rounded-xl font-mono text-xs gap-2 border-border/80 hover:bg-muted text-foreground transition-all"
                 >
                   {loadingMore ? (
                     <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Cargando más productos...</span>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Cargando más modelos...</span>
                     </>
                   ) : (
                     <>
-                      <span>Cargar más productos ({Math.min(PAGE_SIZE, totalCount - products.length)} más)</span>
+                      <span>Cargar más ({Math.min(PAGE_SIZE, totalCount - products.length)} modelos)</span>
                     </>
                   )}
                 </Button>
+              ) : (
                 <p className="text-xs text-muted-foreground font-mono">
-                  Mostrando {products.length.toLocaleString("es-CL")} de {totalCount.toLocaleString("es-CL")} productos disponibles
+                  Has llegado al final del catálogo ({totalCount.toLocaleString("es-CL")} productos)
                 </p>
-              </div>
-            )}
+              )}
+              <p className="text-[11px] text-muted-foreground font-mono">
+                Mostrando {products.length.toLocaleString("es-CL")} de {totalCount.toLocaleString("es-CL")} productos disponibles
+              </p>
+            </div>
           </div>
         ) : (
-          <div className="bg-card border border-border rounded-3xl p-12 text-center space-y-3">
-            <Layers className="w-12 h-12 text-muted-foreground mx-auto opacity-30" />
+          <div className="bg-card border border-border/80 rounded-2xl p-12 text-center space-y-3">
+            <Layers className="w-10 h-10 text-muted-foreground mx-auto opacity-30" />
             <h4 className="font-semibold text-base">No se encontraron productos coincidentes</h4>
             <p className="text-xs text-muted-foreground max-w-md mx-auto">
               Prueba ajustando los filtros de precio, tienda o quitando la marca seleccionada.

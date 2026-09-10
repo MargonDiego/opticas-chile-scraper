@@ -146,13 +146,24 @@ def _map_product_read(prod: Product) -> ProductRead:
     )
 
 
-@app.get("/api/stats", response_model=CatalogStatsRead, tags=["Catalog"], dependencies=[Depends(get_api_key)])
-async def get_catalog_stats(session: AsyncSession = Depends(get_session)):
-    """Return aggregated global metrics across the entire Chilean optics catalog."""
+import time
+
+_CATALOG_CACHE = {
+    "products": [],
+    "stats": None,
+    "timestamp": 0.0,
+    "ttl_seconds": 180.0,  # 3 minutes cache
+}
+
+async def _get_cached_catalog(session: AsyncSession) -> tuple[List[ProductRead], CatalogStatsRead]:
+    now = time.time()
+    if _CATALOG_CACHE["products"] and (now - _CATALOG_CACHE["timestamp"]) < _CATALOG_CACHE["ttl_seconds"]:
+        return _CATALOG_CACHE["products"], _CATALOG_CACHE["stats"]
+
     prod_res = await session.execute(select(Product).options(selectinload(Product.price_snapshots)))
     products = prod_res.scalars().all()
 
-    total_products = len(products)
+    mapped_list: List[ProductRead] = []
     by_store = {}
     by_category = {}
     total_deals = 0
@@ -163,23 +174,24 @@ async def get_catalog_stats(session: AsyncSession = Depends(get_session)):
         by_store[prod.store] = by_store.get(prod.store, 0) + 1
         by_category[prod.category] = by_category.get(prod.category, 0) + 1
 
-        latest = None
-        if prod.price_snapshots:
-            sorted_snaps = sorted(prod.price_snapshots, key=lambda s: s.scraped_at, reverse=True)
-            latest = sorted_snaps[0]
+        mapped = _map_product_read(prod)
+        mapped_list.append(mapped)
 
-        if latest:
-            if latest.is_in_stock is not False:
-                total_in_stock += 1
-            if latest.price_discount and latest.price_normal and latest.price_discount < latest.price_normal:
-                total_deals += 1
-                pct = ((latest.price_normal - latest.price_discount) / latest.price_normal) * 100.0
-                discount_sum += pct
+        if mapped.current_in_stock is not False:
+            total_in_stock += 1
+        if (
+            mapped.current_price_discount
+            and mapped.current_price_normal
+            and mapped.current_price_discount < mapped.current_price_normal
+        ):
+            total_deals += 1
+            pct = ((mapped.current_price_normal - mapped.current_price_discount) / mapped.current_price_normal) * 100.0
+            discount_sum += pct
 
     avg_discount = int(round(discount_sum / total_deals)) if total_deals > 0 else 0
 
-    return CatalogStatsRead(
-        total_products=total_products,
+    stats = CatalogStatsRead(
+        total_products=len(mapped_list),
         total_deals=total_deals,
         avg_discount_percentage=avg_discount,
         total_stores=len(by_store) if by_store else len(get_available_stores()),
@@ -187,6 +199,19 @@ async def get_catalog_stats(session: AsyncSession = Depends(get_session)):
         by_store=by_store,
         by_category=by_category,
     )
+
+    _CATALOG_CACHE["products"] = mapped_list
+    _CATALOG_CACHE["stats"] = stats
+    _CATALOG_CACHE["timestamp"] = now
+
+    return mapped_list, stats
+
+
+@app.get("/api/stats", response_model=CatalogStatsRead, tags=["Catalog"], dependencies=[Depends(get_api_key)])
+async def get_catalog_stats(session: AsyncSession = Depends(get_session)):
+    """Return aggregated global metrics across the entire Chilean optics catalog with ultra-fast memory cache."""
+    _, stats = await _get_cached_catalog(session)
+    return stats
 
 
 @app.get("/api/products", response_model=List[ProductRead], tags=["Products"], dependencies=[Depends(get_api_key)])
@@ -205,28 +230,25 @@ async def get_products(
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_session),
 ):
-    stmt = select(Product).options(selectinload(Product.price_snapshots))
+    all_products, _ = await _get_cached_catalog(session)
 
-    if store and store != "all":
-        stmt = stmt.where(Product.store == store)
-    if brand:
-        stmt = stmt.where(Product.brand.ilike(f"%{brand}%"))
-    if category and category != "all":
-        stmt = stmt.where(Product.category == category)
-    if search and search.strip():
-        term = search.strip()
-        stmt = stmt.where(or_(
-            Product.model_name.ilike(f"%{term}%"),
-            Product.brand.ilike(f"%{term}%"),
-            Product.description.ilike(f"%{term}%"),
-        ))
+    filtered: List[ProductRead] = []
+    brand_lower = brand.lower() if brand else None
+    search_lower = search.strip().lower() if search and search.strip() else None
 
-    res = await session.execute(stmt)
-    products = res.scalars().all()
-
-    mapped_list: List[ProductRead] = []
-    for prod in products:
-        mapped = _map_product_read(prod)
+    for mapped in all_products:
+        if store and store != "all" and mapped.store != store:
+            continue
+        if category and category != "all" and mapped.category != category:
+            continue
+        if brand_lower and (not mapped.brand or brand_lower not in mapped.brand.lower()):
+            continue
+        if search_lower:
+            m_name = (mapped.model_name or "").lower()
+            m_brand = (mapped.brand or "").lower()
+            m_desc = (mapped.description or "").lower()
+            if search_lower not in m_name and search_lower not in m_brand and search_lower not in m_desc:
+                continue
 
         # Stock filter
         if in_stock is True and mapped.current_in_stock is False:
@@ -260,26 +282,26 @@ async def get_products(
             if price <= 0 or price > 100000:
                 continue
 
-        mapped_list.append(mapped)
+        filtered.append(mapped)
 
     # Sorting
     if sort_by == "price-asc":
-        mapped_list.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 99999999))
+        filtered.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 99999999))
     elif sort_by == "price-desc":
-        mapped_list.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 0), reverse=True)
+        filtered.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 0), reverse=True)
     elif sort_by == "discount":
         def get_discount_pct(p: ProductRead) -> float:
             if p.current_price_discount and p.current_price_normal and p.current_price_discount < p.current_price_normal:
                 return (p.current_price_normal - p.current_price_discount) / p.current_price_normal
             return 0.0
-        mapped_list.sort(key=get_discount_pct, reverse=True)
+        filtered.sort(key=get_discount_pct, reverse=True)
     elif sort_by == "recent":
-        mapped_list.sort(key=lambda p: p.updated_at, reverse=True)
+        filtered.sort(key=lambda p: p.updated_at, reverse=True)
 
-    total_count = len(mapped_list)
+    total_count = len(filtered)
     response.headers["X-Total-Count"] = str(total_count)
 
-    return mapped_list[offset : offset + limit]
+    return filtered[offset : offset + limit]
 
 
 @app.get("/api/products/{product_id}", response_model=ProductDetailRead, tags=["Products"], dependencies=[Depends(get_api_key)])
