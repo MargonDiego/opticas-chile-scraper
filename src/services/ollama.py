@@ -94,9 +94,9 @@ class OllamaService:
         constraints_str = f"Restricciones activas: {' '.join(constraints)}\n" if constraints else ""
 
         focus_instruction = (
-            "Presenta de forma atractiva la mejor opción destacada del catálogo (el primer producto de la lista, que es el más conveniente según filtros y presupuesto)."
+            "Recomienda directamente el primer producto de la lista indicando su nombre completo, tienda y precio exacto."
             if (is_cheap_intent or budget_min or budget_max)
-            else "Recomienda la opción más adecuada del catálogo y compara tiendas objetivamente."
+            else "Recomienda la opción más adecuada de la lista y compara tiendas objetivamente."
         )
 
         prompt = (
@@ -105,12 +105,11 @@ class OllamaService:
             f"{constraints_str}"
             "Catálogo de productos disponibles (ordenados por conveniencia):\n"
             f"{matched_products_context}\n\n"
-            "Reglas obligatorias de respuesta:\n"
+            "Reglas obligatorias:\n"
             f"1. {focus_instruction}\n"
-            "2. Redacta en español chileno fluido con concordancia gramatical impecable (ej: 'La opción más conveniente es el modelo [Marca] [Nombre] por $X CLP en [Tienda]').\n"
-            "3. Usa ÚNICAMENTE los nombres, tiendas y precios exactos del catálogo. NUNCA inventes productos ni alteres precios.\n"
-            "4. No des diagnósticos ni recetas médicas.\n"
-            "5. Limítate a máximo 2 oraciones concisas y termina siempre con punto final.\n\n"
+            "2. Usa ÚNICAMENTE los productos, tiendas y precios reales de la lista. NUNCA inventes productos ni uses marcadores como [Marca], [Nombre] o [Tienda].\n"
+            "3. No des diagnósticos ni recetas médicas.\n"
+            "4. Escribe 1 o 2 oraciones concisas y fluidas en español chileno, terminando con punto final.\n\n"
             "Recomendación:"
         )
 

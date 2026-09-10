@@ -546,10 +546,10 @@ def _extract_budget_range(text: str) -> Tuple[Optional[int], Optional[int]]:
     """Extract (min_price, max_price) in CLP from natural Spanish queries."""
     text_lower = text.lower()
 
-    # 1. Range: 'entre X y Y', 'de X a Y', 'desde X hasta Y'
+    # 1. Range: 'entre los X y los Y', 'entre X y Y', 'de X a Y', 'desde X hasta Y'
     range_patterns = [
-        r"(?:entre|rango\s+de)\s+\$?([0-9.,k]+(?:\s*lucas?|\s*mil)?)\s+(?:y|e|a|-)\s+\$?([0-9.,k]+(?:\s*lucas?|\s*mil)?)",
-        r"(?:desde|de)\s+\$?([0-9.,k]+(?:\s*lucas?|\s*mil)?)\s+(?:hasta|a|-)\s+\$?([0-9.,k]+(?:\s*lucas?|\s*mil)?)",
+        r"(?:entre|rango\s+de)\s+(?:los\s+|las\s+)?\$?([0-9.,k]+(?:\s*lucas?|\s*mil)?)\s+(?:y|e|a|-)\s+(?:los\s+|las\s+)?\$?([0-9.,k]+(?:\s*lucas?|\s*mil)?)",
+        r"(?:desde|de)\s+(?:los\s+|las\s+)?\$?([0-9.,k]+(?:\s*lucas?|\s*mil)?)\s+(?:hasta|a|-)\s+(?:los\s+|las\s+)?\$?([0-9.,k]+(?:\s*lucas?|\s*mil)?)",
     ]
     for pat in range_patterns:
         m = re.search(pat, text_lower)
