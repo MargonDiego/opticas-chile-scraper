@@ -145,14 +145,19 @@ export function AdvisorChatWidget({ apiBaseUrl, apiKey }: Props) {
 
   return (
     <>
-      {/* Floating Trigger Button */}
+      {/* Floating Concierge Trigger */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="fixed bottom-6 right-6 z-40 flex items-center gap-2.5 bg-foreground text-background hover:bg-foreground/90 px-4.5 py-3 rounded-2xl shadow-lg hover:shadow-xl hover:scale-[1.02] active:scale-95 transition-all duration-200 border border-border/60 font-mono text-xs font-bold"
+        className="fixed bottom-6 right-6 z-40 group flex items-center gap-2.5 px-4 py-2 rounded-full bg-card/95 hover:bg-card text-foreground border border-border/90 hover:border-emerald-500/60 shadow-xl shadow-black/40 hover:scale-[1.02] active:scale-95 transition-all duration-200 backdrop-blur-md"
+        aria-label="Abrir Asesor Óptico Inteligente"
       >
-        <Sparkles className="w-4 h-4 text-emerald-400" />
-        <span>Asesor Óptico</span>
-        <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+        <div className="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 group-hover:scale-110 transition-transform">
+          <Sparkles className="w-3.5 h-3.5" />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold tracking-tight text-foreground">Asesor IA</span>
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+        </div>
       </button>
 
       {/* Chat Drawer / Modal */}
