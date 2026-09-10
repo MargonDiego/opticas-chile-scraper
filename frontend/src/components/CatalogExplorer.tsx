@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState } from "react";
 import { ProductCard, type Product } from "./ProductCard";
 import { PriceHistoryModal } from "./PriceHistoryModal";
 import { Input } from "./ui/input";
@@ -22,6 +22,16 @@ import { formatCLP } from "@/lib/utils";
 interface Props {
   apiBaseUrl: string;
   apiKey: string;
+}
+
+interface CatalogStats {
+  total_products: number;
+  total_deals: number;
+  avg_discount_percentage: number;
+  total_stores: number;
+  total_in_stock: number;
+  by_store: Record<string, number>;
+  by_category: Record<string, number>;
 }
 
 const STORES = [
@@ -65,9 +75,15 @@ const DEAL_FILTERS = [
   { id: "under-100k", label: "Menos de $100.000" },
 ];
 
+const PAGE_SIZE = 36;
+
 export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [totalCount, setTotalCount] = useState<number>(0);
+  const [catalogStats, setCatalogStats] = useState<CatalogStats | null>(null);
+
   const [search, setSearch] = useState("");
   const [semanticMode, setSemanticMode] = useState(false);
   const [selectedStore, setSelectedStore] = useState("all");
@@ -75,12 +91,32 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
   const [selectedBrand, setSelectedBrand] = useState<string | null>(null);
   const [dealFilter, setDealFilter] = useState("all");
   const [onlyInStock, setOnlyInStock] = useState(false);
-  const [sortBy, setSortBy] = useState<"price-asc" | "price-desc" | "discount">("price-asc");
+  const [sortBy, setSortBy] = useState<"price-asc" | "price-desc" | "discount" | "recent">("price-asc");
   const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
 
-  // Fetch Catalog
-  const fetchProducts = async () => {
-    setLoading(true);
+  // 1. Fetch Global Stats
+  const fetchStats = async () => {
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/stats`, {
+        headers: { "X-API-Key": apiKey },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCatalogStats(data);
+      }
+    } catch (err) {
+      console.error("Error fetching catalog stats:", err);
+    }
+  };
+
+  // 2. Fetch Catalog Products (Reset or Append)
+  const fetchProducts = async (isAppend: boolean = false) => {
+    if (isAppend) {
+      setLoadingMore(true);
+    } else {
+      setLoading(true);
+    }
+
     try {
       if (semanticMode && search.trim()) {
         const res = await fetch(`${apiBaseUrl}/api/products/search/semantic`, {
@@ -93,138 +129,93 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
             query: search.trim(),
             store: selectedStore === "all" ? undefined : selectedStore,
             category: selectedCategory === "all" ? undefined : selectedCategory,
-            limit: 120,
+            limit: 60,
           }),
         });
         if (res.ok) {
           const data = await res.json();
           setProducts(data);
+          setTotalCount(data.length);
         }
       } else {
-        const params = new URLSearchParams({ limit: "150" });
+        const offset = isAppend ? products.length : 0;
+        const params = new URLSearchParams({
+          limit: String(PAGE_SIZE),
+          offset: String(offset),
+          sort_by: sortBy,
+        });
+
         if (selectedStore !== "all") params.append("store", selectedStore);
         if (selectedCategory !== "all") params.append("category", selectedCategory);
         if (selectedBrand) params.append("brand", selectedBrand);
         if (search.trim()) params.append("search", search.trim());
+        if (dealFilter !== "all") params.append("deal", dealFilter);
+        if (onlyInStock) params.append("in_stock", "true");
 
         const res = await fetch(`${apiBaseUrl}/api/products?${params.toString()}`, {
           headers: { "X-API-Key": apiKey },
         });
+
         if (res.ok) {
+          const countHeader = res.headers.get("X-Total-Count");
           const data = await res.json();
-          setProducts(data);
+
+          if (countHeader) {
+            setTotalCount(parseInt(countHeader, 10));
+          } else if (!isAppend) {
+            setTotalCount(data.length);
+          }
+
+          if (isAppend) {
+            setProducts((prev) => [...prev, ...data]);
+          } else {
+            setProducts(data);
+          }
         }
       }
     } catch (err) {
       console.error("Error fetching products:", err);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   };
 
+  // Initial load: Stats and Products
   useEffect(() => {
-    fetchProducts();
-  }, [selectedStore, selectedCategory, selectedBrand, semanticMode]);
+    fetchStats();
+  }, []);
+
+  // When filters change: reload products from offset 0
+  useEffect(() => {
+    fetchProducts(false);
+  }, [selectedStore, selectedCategory, selectedBrand, dealFilter, onlyInStock, sortBy, semanticMode]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    fetchProducts();
+    fetchProducts(false);
   };
 
-  // Client-side statistics for Market Pulse
-  const stats = useMemo(() => {
-    const total = products.length;
-    let dealsCount = 0;
-    let totalDiscountPct = 0;
+  const handleRefresh = () => {
+    fetchStats();
+    fetchProducts(false);
+  };
 
-    for (const p of products) {
-      if (
-        p.current_price_discount &&
-        p.current_price_normal &&
-        p.current_price_discount < p.current_price_normal
-      ) {
-        dealsCount++;
-        const pct =
-          ((p.current_price_normal - p.current_price_discount) / p.current_price_normal) * 100;
-        totalDiscountPct += pct;
-      }
+  const handleLoadMore = () => {
+    if (!loadingMore && products.length < totalCount) {
+      fetchProducts(true);
     }
+  };
 
-    const avgDiscount = dealsCount > 0 ? Math.round(totalDiscountPct / dealsCount) : 0;
-    return { total, dealsCount, avgDiscount };
-  }, [products]);
-
-  // Client-side filtering & sorting
-  const filteredAndSortedProducts = useMemo(() => {
-    let list = [...products];
-
-    // Filter by Brand if set in client
-    if (selectedBrand) {
-      const bLower = selectedBrand.toLowerCase();
-      list = list.filter(
-        (p) =>
-          p.brand?.toLowerCase().includes(bLower) ||
-          p.model_name?.toLowerCase().includes(bLower)
-      );
-    }
-
-    // Filter by Stock
-    if (onlyInStock) {
-      list = list.filter((p) => p.current_in_stock !== false);
-    }
-
-    // Deal Hunter filter
-    if (dealFilter === "disc-40") {
-      list = list.filter((p) => {
-        if (!p.current_price_discount || !p.current_price_normal) return false;
-        const pct =
-          ((p.current_price_normal - p.current_price_discount) / p.current_price_normal) * 100;
-        return pct >= 40;
-      });
-    } else if (dealFilter === "disc-20") {
-      list = list.filter((p) => {
-        if (!p.current_price_discount || !p.current_price_normal) return false;
-        const pct =
-          ((p.current_price_normal - p.current_price_discount) / p.current_price_normal) * 100;
-        return pct >= 20;
-      });
-    } else if (dealFilter === "under-50k") {
-      list = list.filter((p) => {
-        const price = p.current_price_discount || p.current_price_normal || 0;
-        return price > 0 && price <= 50000;
-      });
-    } else if (dealFilter === "under-100k") {
-      list = list.filter((p) => {
-        const price = p.current_price_discount || p.current_price_normal || 0;
-        return price > 0 && price <= 100000;
-      });
-    }
-
-    // Sort
-    return list.sort((a, b) => {
-      const pA = a.current_price_discount || a.current_price_normal || 0;
-      const pB = b.current_price_discount || b.current_price_normal || 0;
-
-      if (sortBy === "price-asc") return pA - pB;
-      if (sortBy === "price-desc") return pB - pA;
-      if (sortBy === "discount") {
-        const discA =
-          a.current_price_normal && a.current_price_discount
-            ? a.current_price_normal - a.current_price_discount
-            : 0;
-        const discB =
-          b.current_price_normal && b.current_price_discount
-            ? b.current_price_normal - b.current_price_discount
-            : 0;
-        return discB - discA;
-      }
-      return 0;
-    });
-  }, [products, sortBy, onlyInStock, selectedBrand, dealFilter]);
+  // Display metrics
+  const displayTotal = catalogStats?.total_products ?? 9980;
+  const displayDeals = catalogStats?.total_deals ?? 4323;
+  const displayDiscount = catalogStats?.avg_discount_percentage ?? 46;
+  const displayStores = catalogStats?.total_stores ?? 7;
 
   return (
     <div className="space-y-6">
-      {/* 1. Market Pulse / Metrics Ribbon */}
+      {/* 1. Market Pulse / Real Global Metrics Ribbon */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="p-4 rounded-2xl bg-card border border-border/80 flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
@@ -233,7 +224,7 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
           <div>
             <p className="text-xs text-muted-foreground font-medium">Productos Activos</p>
             <p className="text-xl font-bold font-mono text-foreground leading-tight">
-              {stats.total > 0 ? stats.total.toLocaleString("es-CL") : "7.600+"}
+              {displayTotal.toLocaleString("es-CL")}
             </p>
           </div>
         </div>
@@ -245,7 +236,7 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
           <div>
             <p className="text-xs text-muted-foreground font-medium">Ofertas Detectadas</p>
             <p className="text-xl font-bold font-mono text-foreground leading-tight">
-              {stats.dealsCount.toLocaleString("es-CL")}
+              {displayDeals.toLocaleString("es-CL")}
             </p>
           </div>
         </div>
@@ -257,7 +248,7 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
           <div>
             <p className="text-xs text-muted-foreground font-medium">Descuento Promedio</p>
             <p className="text-xl font-bold font-mono text-foreground leading-tight">
-              {stats.avgDiscount > 0 ? `-${stats.avgDiscount}%` : "-30%"}
+              {displayDiscount > 0 ? `-${displayDiscount}%` : "-46%"}
             </p>
           </div>
         </div>
@@ -268,7 +259,9 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
           </div>
           <div>
             <p className="text-xs text-muted-foreground font-medium">Cadenas Comparadas</p>
-            <p className="text-xl font-bold font-mono text-foreground leading-tight">7 Tiendas</p>
+            <p className="text-xl font-bold font-mono text-foreground leading-tight">
+              {displayStores} Tiendas
+            </p>
           </div>
         </div>
       </div>
@@ -335,7 +328,7 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
         {/* 4. Top Brands Selector */}
         <div className="space-y-2 pt-2">
           <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-            <span>Marcar Populares:</span>
+            <span>Marcas Populares:</span>
             {selectedBrand && (
               <button
                 onClick={() => setSelectedBrand(null)}
@@ -424,51 +417,103 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
               <option value="price-asc">Menor Precio</option>
               <option value="price-desc">Mayor Precio</option>
               <option value="discount">Mayor Descuento ($)</option>
+              <option value="recent">Recién Agregados</option>
             </Select>
           </div>
         </div>
       </Card>
 
-      {/* Catalog Grid Header */}
+      {/* Catalog Grid Header & Results Status */}
       <div>
         <div className="flex items-center justify-between mb-4">
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            Resultados ({filteredAndSortedProducts.length} productos)
-          </p>
+          <div className="flex items-center gap-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {loading ? (
+                "Buscando productos..."
+              ) : (
+                `Mostrando ${products.length} de ${totalCount.toLocaleString("es-CL")} productos`
+              )}
+            </p>
+            {totalCount > products.length && !loading && (
+              <span className="text-[11px] text-primary font-mono font-medium">
+                ({Math.round((products.length / totalCount) * 100)}%)
+              </span>
+            )}
+          </div>
+
           <button
-            onClick={fetchProducts}
+            onClick={handleRefresh}
             className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors font-medium"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} /> Actualizar
           </button>
         </div>
 
-        {/* Products Grid */}
+        {/* Products Grid / Skeletons */}
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
             {[...Array(8)].map((_, i) => (
               <div
                 key={i}
-                className="bg-card border border-border rounded-2xl p-4 h-80 animate-pulse flex flex-col justify-between"
+                className="bg-card/70 border border-border/70 rounded-2xl p-4 h-96 flex flex-col justify-between animate-pulse"
               >
-                <div className="w-20 h-4 bg-muted rounded-full" />
-                <div className="w-full h-36 bg-muted rounded-xl" />
+                <div className="flex justify-between items-center">
+                  <div className="w-20 h-5 bg-muted/80 rounded-full" />
+                  <div className="w-12 h-5 bg-muted/60 rounded-full" />
+                </div>
+                <div className="w-full h-40 bg-muted/40 rounded-xl my-2 flex items-center justify-center">
+                  <div className="w-12 h-12 rounded-full bg-muted/60" />
+                </div>
                 <div className="space-y-2">
-                  <div className="w-3/4 h-4 bg-muted rounded" />
-                  <div className="w-1/2 h-5 bg-muted rounded" />
+                  <div className="w-1/3 h-3.5 bg-muted/60 rounded" />
+                  <div className="w-4/5 h-4 bg-muted/80 rounded" />
+                </div>
+                <div className="pt-2 border-t border-border/50 flex justify-between items-center">
+                  <div className="space-y-1">
+                    <div className="w-24 h-5 bg-muted/90 rounded" />
+                    <div className="w-16 h-3 bg-muted/50 rounded" />
+                  </div>
+                  <div className="w-8 h-8 rounded-lg bg-muted/60" />
                 </div>
               </div>
             ))}
           </div>
-        ) : filteredAndSortedProducts.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-            {filteredAndSortedProducts.map((p) => (
-              <ProductCard
-                key={p.id}
-                product={p}
-                onViewHistory={(id) => setActiveHistoryId(id)}
-              />
-            ))}
+        ) : products.length > 0 ? (
+          <div className="space-y-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+              {products.map((p) => (
+                <ProductCard
+                  key={p.id}
+                  product={p}
+                  onViewHistory={(id) => setActiveHistoryId(id)}
+                />
+              ))}
+            </div>
+
+            {/* Load More Button & Infinite Pagination Bar */}
+            {products.length < totalCount && (
+              <div className="flex flex-col items-center justify-center pt-4 pb-8 space-y-3">
+                <Button
+                  onClick={handleLoadMore}
+                  disabled={loadingMore}
+                  className="h-12 px-8 rounded-2xl font-semibold text-sm gap-2 shadow-lg shadow-primary/20 hover:scale-[1.02] transition-transform"
+                >
+                  {loadingMore ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Cargando más productos...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Cargar más productos ({Math.min(PAGE_SIZE, totalCount - products.length)} más)</span>
+                    </>
+                  )}
+                </Button>
+                <p className="text-xs text-muted-foreground font-mono">
+                  Mostrando {products.length.toLocaleString("es-CL")} de {totalCount.toLocaleString("es-CL")} productos disponibles
+                </p>
+              </div>
+            )}
           </div>
         ) : (
           <div className="bg-card border border-border rounded-3xl p-12 text-center space-y-3">

@@ -154,3 +154,13 @@ class ScrapeTriggerRequest(SQLModel):
 class ScrapeTriggerResponse(SQLModel):
     message: str
     job_ids: List[int]
+
+
+class CatalogStatsRead(SQLModel):
+    total_products: int
+    total_deals: int
+    avg_discount_percentage: int
+    total_stores: int
+    total_in_stock: int
+    by_store: dict
+    by_category: dict
