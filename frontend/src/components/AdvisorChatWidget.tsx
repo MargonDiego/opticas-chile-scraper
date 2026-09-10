@@ -145,50 +145,47 @@ export function AdvisorChatWidget({ apiBaseUrl, apiKey }: Props) {
 
   return (
     <>
-      {/* Floating trigger button */}
+      {/* Floating Trigger Button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="fixed bottom-6 right-6 z-40 flex items-center gap-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white px-5 py-3.5 rounded-full shadow-xl hover:shadow-2xl hover:scale-105 active:scale-95 transition-all duration-200 border border-emerald-400/30"
+        className="fixed bottom-6 right-6 z-40 flex items-center gap-2.5 bg-foreground text-background hover:bg-foreground/90 px-4.5 py-3 rounded-2xl shadow-lg hover:shadow-xl hover:scale-[1.02] active:scale-95 transition-all duration-200 border border-border/60 font-mono text-xs font-bold"
       >
-        <Sparkles className="w-5 h-5 animate-pulse" />
-        <span className="font-semibold text-sm tracking-tight">Asesor IA</span>
-        <span className="flex h-2 w-2 relative">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-300 opacity-75"></span>
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-200"></span>
-        </span>
+        <Sparkles className="w-4 h-4 text-emerald-400" />
+        <span>Asesor Óptico</span>
+        <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
       </button>
 
       {/* Chat Drawer / Modal */}
       {isOpen && (
-        <div className="fixed bottom-20 right-4 sm:right-6 z-50 w-[calc(100vw-2rem)] sm:w-[440px] bg-card text-card-foreground border border-border/90 rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[580px] max-h-[85vh] animate-in slide-in-from-bottom-5 duration-200 backdrop-blur-xl">
+        <div className="fixed bottom-20 right-4 sm:right-6 z-50 w-[calc(100vw-2rem)] sm:w-[440px] bg-card text-card-foreground border border-border/90 rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[580px] max-h-[85vh] animate-in slide-in-from-bottom-5 duration-200">
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white border-b border-border/40">
+          <div className="flex items-center justify-between px-4 py-3.5 bg-card border-b border-border/80 text-foreground">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center">
+              <div className="w-8 h-8 rounded-xl bg-muted text-foreground border border-border/80 flex items-center justify-center">
                 <Bot className="w-4 h-4" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h4 className="font-bold text-sm tracking-tight">Asesor de Ópticas</h4>
-                  <span className="flex items-center gap-1 text-[10px] font-mono text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-500/30">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <h4 className="font-bold text-sm tracking-tight">Asesor Óptico</h4>
+                  <span className="flex items-center gap-1 text-[10px] font-mono text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 font-bold">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                     En vivo
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-400">Comparativa 7 cadenas chilenas</p>
+                <p className="text-[11px] text-muted-foreground font-mono">Búsqueda semántica & asesoría</p>
               </div>
             </div>
             <div className="flex items-center gap-1">
               <button
                 onClick={handleReset}
                 title="Reiniciar conversación"
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               >
                 <RotateCcw className="w-4 h-4" />
               </button>
               <button
                 onClick={() => setIsOpen(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -203,14 +200,14 @@ export function AdvisorChatWidget({ apiBaseUrl, apiKey }: Props) {
                 className={`flex gap-2.5 ${m.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 {m.role === "assistant" && (
-                  <div className="w-7 h-7 rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                  <div className="w-7 h-7 rounded-xl bg-muted text-foreground border border-border/80 flex items-center justify-center shrink-0 mt-0.5">
                     <Bot className="w-3.5 h-3.5" />
                   </div>
                 )}
                 <div
                   className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
                     m.role === "user"
-                      ? "bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-medium rounded-br-sm shadow-sm"
+                      ? "bg-primary text-primary-foreground font-medium rounded-br-sm shadow-xs"
                       : "bg-muted/70 text-foreground border border-border/80 rounded-bl-sm"
                   }`}
                 >
@@ -358,7 +355,7 @@ export function AdvisorChatWidget({ apiBaseUrl, apiKey }: Props) {
             <button
               type="submit"
               disabled={loading || !input.trim()}
-              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white disabled:opacity-40 transition-all shrink-0 shadow-sm"
+              className="px-3.5 py-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 transition-all shrink-0 shadow-xs font-bold"
             >
               <Send className="w-4 h-4" />
             </button>
