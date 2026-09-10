@@ -126,11 +126,16 @@ class LentesplusScraper(BaseOpticalScraper):
 
             # Brand detection
             brand = "Lentesplus"
-            first_word = name.split()[0] if name else ""
-            known_brands = ["Acuvue", "Biofinity", "Air Optix", "Soflens", "PureVision", "Biotrue", "Dailies", "Clariti", "Avaira", "Ultra", "Opti-Free", "Renu", "Biotrue"]
+            known_brands = [
+                "Ray-Ban", "RayBan", "Oakley", "Vogue", "Armani Exchange", "Emporio Armani",
+                "Michael Kors", "Arnette", "Carrera", "Police", "Hugo Boss", "Boss",
+                "Ralph", "Polo Ralph Lauren", "Prada", "Versace", "Gucci", "Burberry",
+                "Acuvue", "Biofinity", "Air Optix", "Soflens", "PureVision", "Biotrue",
+                "Dailies", "Clariti", "Avaira", "Ultra", "Opti-Free", "Renu", "Alcon", "Bausch + Lomb"
+            ]
             for kb in known_brands:
                 if kb.lower() in name.lower():
-                    brand = kb
+                    brand = "Ray-Ban" if kb.lower() in ["ray-ban", "rayban"] else kb
                     break
 
             return ScrapedItem(

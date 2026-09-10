@@ -94,7 +94,7 @@ class OllamaService:
         constraints_str = f"Restricciones activas: {' '.join(constraints)}\n" if constraints else ""
 
         focus_instruction = (
-            "Destaca como opción principal el producto más conveniente de la lista (el primer producto del catálogo listado que cumple el presupuesto y filtros)."
+            "Presenta de forma atractiva la mejor opción destacada del catálogo (el primer producto de la lista, que es el más conveniente según filtros y presupuesto)."
             if (is_cheap_intent or budget_min or budget_max)
             else "Recomienda la opción más adecuada del catálogo y compara tiendas objetivamente."
         )
@@ -103,14 +103,14 @@ class OllamaService:
             "Eres un Asesor Experto en Ópticas en Chile.\n"
             f"Consulta del usuario: '{user_query}'\n"
             f"{constraints_str}"
-            "Catálogo de productos encontrados (ya filtrados y ordenados por conveniencia):\n"
+            "Catálogo de productos disponibles (ordenados por conveniencia):\n"
             f"{matched_products_context}\n\n"
-            "Reglas obligatorias:\n"
+            "Reglas obligatorias de respuesta:\n"
             f"1. {focus_instruction}\n"
-            "2. Usa ÚNICAMENTE los nombres, marcas y precios exactos del catálogo listado arriba. NUNCA inventes productos ni alteres precios.\n"
-            "3. Si mencionas el precio, escribe la cifra exacta en pesos chilenos ($ CLP).\n"
+            "2. Redacta en español chileno fluido con concordancia gramatical impecable (ej: 'La opción más conveniente es el modelo [Marca] [Nombre] por $X CLP en [Tienda]').\n"
+            "3. Usa ÚNICAMENTE los nombres, tiendas y precios exactos del catálogo. NUNCA inventes productos ni alteres precios.\n"
             "4. No des diagnósticos ni recetas médicas.\n"
-            "5. Responde de forma concisa y directa en 2 oraciones completas y termina con punto final.\n\n"
+            "5. Limítate a máximo 2 oraciones concisas y termina siempre con punto final.\n\n"
             "Recomendación:"
         )
 

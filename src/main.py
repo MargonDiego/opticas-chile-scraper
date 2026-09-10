@@ -583,6 +583,21 @@ def _extract_budget_range(text: str) -> Tuple[Optional[int], Optional[int]]:
     return None, None
 
 
+def _detect_category(text: str) -> Optional[str]:
+    """Detect optical product category from multi-word phrases and domain keywords."""
+    t = text.lower()
+    # 1. Contact lenses
+    if any(k in t for k in ["contacto", "lentilla", "lentillas", "biofinity", "acuvue", "astigmatismo", "miopia", "toricos", "diarios", "mensuales", "soflens", "dailies"]):
+        return "contacto"
+    # 2. Sunglasses
+    if any(k in t for k in ["lentes de sol", "anteojos de sol", "gafas de sol", "gafas solares", "sol", "polarizado", "polarizados", "polarized", "aviador", "aviator", "trekking", "senderismo", "playa", "ciclismo", "running"]):
+        return "sol"
+    # 3. Optical frames
+    if any(k in t for k in ["lentes opticos", "lentes ópticos", "anteojos opticos", "anteojos ópticos", "armazon", "armazones", "marco", "marcos", "computador", "pantalla", "filtro azul", "blue defense", "receta", "lectura", "descanso", "pega", "trabajo", "laburo"]):
+        return "opticos"
+    return None
+
+
 @app.post("/api/advisor/chat", response_model=AdvisorChatResponse, tags=["AI & Vector Search"], dependencies=[Depends(get_api_key)])
 async def advisor_chat(
     req: AdvisorChatRequest,
@@ -600,11 +615,14 @@ async def advisor_chat(
     # 3. Detect Specific Brand (with typo / fuzzy tolerance)
     detected_brand = _detect_brand(clean_msg)
 
-    # 4. Detect Stock Requirement
+    # 4. Detect Category Intent (multi-word and keyword mapping)
+    inferred_category = req.category or _detect_category(clean_msg)
+
+    # 5. Detect Stock Requirement
     stock_keywords = ["con stock", "en stock", "que haya stock", "disponible", "disponibles", "tengan stock"]
     requires_stock = any(k in clean_msg for k in stock_keywords)
 
-    # 5. Detect Strict Deal / Discount Intent
+    # 6. Detect Strict Deal / Discount Intent
     deal_keywords = [
         "en oferta", "con oferta", "de oferta", "ofertas", "oferta",
         "con descuento", "en descuento", "descuentos", "descuento",
@@ -617,21 +635,13 @@ async def advisor_chat(
     is_cheap_intent = budget_min is not None or budget_max is not None or requires_discount or any(w in BUDGET_CHEAP_KEYWORDS or "barat" in w or "econom" in w for w in raw_words)
     is_expensive_intent = any(w in BUDGET_EXPENSIVE_KEYWORDS for w in raw_words)
 
-    # 6. Filter meaningful product keywords
+    # 7. Filter meaningful product keywords
     meaningful_words = [
         w for w in raw_words
         if len(w) >= 2 and w not in OPTICAL_STOP_WORDS and w not in BUDGET_CHEAP_KEYWORDS and w not in BUDGET_EXPENSIVE_KEYWORDS
         and w not in deal_keywords and w not in stock_keywords
         and not w.isdigit()
     ]
-
-    # Auto-detect category from domain intent if not provided
-    inferred_category = req.category
-    if not inferred_category:
-        for w in raw_words:
-            if w in INTENT_CATEGORY_MAP:
-                inferred_category = INTENT_CATEGORY_MAP[w]
-                break
 
     # Expand keywords with domain synonyms
     search_terms = list(meaningful_words)
@@ -714,13 +724,19 @@ async def advisor_chat(
         if brand_filtered:
             mapped_products = brand_filtered
 
-    # 3. Strict Stock Requirement
+    # 3. Strict Category Filter if requested or inferred
+    if inferred_category:
+        cat_filtered = [p for p in mapped_products if p.category == inferred_category]
+        if cat_filtered:
+            mapped_products = cat_filtered
+
+    # 4. Strict Stock Requirement
     if requires_stock:
         stock_filtered = [p for p in mapped_products if p.current_in_stock is not False]
         if stock_filtered:
             mapped_products = stock_filtered
 
-    # 4. Strict Discount / Offer Filter
+    # 5. Strict Discount / Offer Filter
     if requires_discount:
         discount_filtered = [
             p for p in mapped_products
@@ -731,7 +747,7 @@ async def advisor_chat(
         if discount_filtered:
             mapped_products = discount_filtered
 
-    # 5. Strict Numeric Price Range (min and max)
+    # 6. Strict Numeric Price Range (min and max)
     if budget_min is not None or budget_max is not None:
         range_filtered = []
         for p in mapped_products:
@@ -746,7 +762,16 @@ async def advisor_chat(
         if range_filtered:
             mapped_products = range_filtered
 
-    # 6. Sort Deterministically by Effective Price or Discount
+    # 7. Adult vs Kids Prioritization (unless user specifically asked for kids)
+    wants_kids = any(k in clean_msg for k in ["niño", "niña", "niños", "niñas", "hijo", "hija", "hijos", "hijas", "kids", "junior", "juvenil", "infantil"])
+    if not wants_kids:
+        is_kids = lambda p: any(k in (p.model_name + " " + (p.description or "")).lower() for k in ["junior", "juvenil", "kids", "infantil", "niños", "niñas", "años)"])
+        adults = [p for p in mapped_products if not is_kids(p)]
+        kids = [p for p in mapped_products if is_kids(p)]
+        if adults:
+            mapped_products = adults + kids
+
+    # 8. Sort Deterministically by Effective Price or Discount
     if is_cheap_intent or budget_min is not None or budget_max is not None:
         mapped_products.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 99999999))
     elif is_expensive_intent:
