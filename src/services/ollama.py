@@ -72,10 +72,13 @@ class OllamaService:
         budget_min: Optional[int] = None,
         budget_max: Optional[int] = None,
         detected_brand: Optional[str] = None,
+        target_store: Optional[str] = None,
         requires_discount: bool = False,
     ) -> str:
         """Use Ollama LLM to synthesize optical product recommendations with guardrails."""
         constraints = []
+        if target_store:
+            constraints.append(f"Tienda solicitada: {target_store.upper()}.")
         if detected_brand:
             constraints.append(f"Marca solicitada: {detected_brand}.")
         if budget_min and budget_max:

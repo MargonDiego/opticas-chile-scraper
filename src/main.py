@@ -1,4 +1,5 @@
 import csv
+import difflib
 import io
 import json
 import logging
@@ -448,6 +449,27 @@ INTENT_SYNONYMS = {
 }
 
 
+STORE_ALIASES = {
+    "gmo": "gmo",
+    "opticas gmo": "gmo",
+    "ópticas gmo": "gmo",
+    "place vendome": "place_vendome",
+    "place vendôme": "place_vendome",
+    "opv": "place_vendome",
+    "rotter": "ryk",
+    "rotter & krauss": "ryk",
+    "rotter y krauss": "ryk",
+    "ryk": "ryk",
+    "schilling": "schilling",
+    "opticas schilling": "schilling",
+    "ópticas schilling": "schilling",
+    "econopticas": "econopticas",
+    "econópticas": "econopticas",
+    "karun": "karun",
+    "karün": "karun",
+    "lentesplus": "lentesplus",
+}
+
 BRAND_ALIASES = {
     "rayban": "Ray-Ban",
     "ray-ban": "Ray-Ban",
@@ -477,6 +499,30 @@ BRAND_ALIASES = {
     "hugo boss": "Boss",
     "boss": "Boss",
 }
+
+
+def _detect_store(text: str) -> Optional[str]:
+    t_lower = text.lower()
+    for alias, store_id in sorted(STORE_ALIASES.items(), key=lambda x: len(x[0]), reverse=True):
+        if re.search(rf"\b{re.escape(alias)}\b", t_lower):
+            return store_id
+    return None
+
+
+def _detect_brand(text: str) -> Optional[str]:
+    t_lower = text.lower()
+    # 1. Direct match
+    for alias, brand_name in sorted(BRAND_ALIASES.items(), key=lambda x: len(x[0]), reverse=True):
+        if alias in t_lower:
+            return brand_name
+    # 2. Fuzzy match word by word for common typos (e.g. 'rayan' -> 'Ray-Ban')
+    words = [w.strip(".,;:!?\"'()") for w in t_lower.split()]
+    for w in words:
+        if len(w) >= 4:
+            matches = difflib.get_close_matches(w, list(BRAND_ALIASES.keys()), n=1, cutoff=0.72)
+            if matches:
+                return BRAND_ALIASES[matches[0]]
+    return None
 
 
 def _parse_amount(raw: str) -> Optional[int]:
@@ -548,18 +594,17 @@ async def advisor_chat(
     # 1. Detect Budget Range (min & max in CLP)
     budget_min, budget_max = _extract_budget_range(clean_msg)
 
-    # 2. Detect Specific Brand
-    detected_brand = None
-    for alias, formal_name in BRAND_ALIASES.items():
-        if alias in clean_msg:
-            detected_brand = formal_name
-            break
+    # 2. Detect Store Intent from text or request
+    target_store = req.store or _detect_store(clean_msg)
 
-    # 3. Detect Stock Requirement
+    # 3. Detect Specific Brand (with typo / fuzzy tolerance)
+    detected_brand = _detect_brand(clean_msg)
+
+    # 4. Detect Stock Requirement
     stock_keywords = ["con stock", "en stock", "que haya stock", "disponible", "disponibles", "tengan stock"]
     requires_stock = any(k in clean_msg for k in stock_keywords)
 
-    # 4. Detect Strict Deal / Discount Intent
+    # 5. Detect Strict Deal / Discount Intent
     deal_keywords = [
         "en oferta", "con oferta", "de oferta", "ofertas", "oferta",
         "con descuento", "en descuento", "descuentos", "descuento",
@@ -572,7 +617,7 @@ async def advisor_chat(
     is_cheap_intent = budget_min is not None or budget_max is not None or requires_discount or any(w in BUDGET_CHEAP_KEYWORDS or "barat" in w or "econom" in w for w in raw_words)
     is_expensive_intent = any(w in BUDGET_EXPENSIVE_KEYWORDS for w in raw_words)
 
-    # 5. Filter meaningful product keywords
+    # 6. Filter meaningful product keywords
     meaningful_words = [
         w for w in raw_words
         if len(w) >= 2 and w not in OPTICAL_STOP_WORDS and w not in BUDGET_CHEAP_KEYWORDS and w not in BUDGET_EXPENSIVE_KEYWORDS
@@ -599,8 +644,8 @@ async def advisor_chat(
     query_vector = await ollama_service.get_embedding(req.message)
     stmt = select(Product).options(selectinload(Product.price_snapshots))
 
-    if req.store:
-        stmt = stmt.where(Product.store == req.store)
+    if target_store:
+        stmt = stmt.where(Product.store == target_store)
     if inferred_category:
         stmt = stmt.where(Product.category == inferred_category)
 
@@ -628,8 +673,8 @@ async def advisor_chat(
     res = await session.execute(stmt)
     products = res.scalars().all()
 
-    # Fallback to category products ONLY IF no specific brand was requested
-    if len(products) < 5 and inferred_category and not detected_brand:
+    # Fallback to category products ONLY IF no specific brand and no specific store was requested
+    if len(products) < 5 and inferred_category and not detected_brand and not target_store:
         fallback_stmt = (
             select(Product)
             .options(selectinload(Product.price_snapshots))
@@ -644,7 +689,10 @@ async def advisor_chat(
                 products.append(p)
 
     if not products:
-        global_fallback = select(Product).options(selectinload(Product.price_snapshots)).limit(100)
+        global_fallback = select(Product).options(selectinload(Product.price_snapshots))
+        if target_store:
+            global_fallback = global_fallback.where(Product.store == target_store)
+        global_fallback = global_fallback.limit(100)
         res_gf = await session.execute(global_fallback)
         products = res_gf.scalars().all()
 
@@ -652,23 +700,27 @@ async def advisor_chat(
 
     # === STRICT DETERMINISTIC PIPELINE ===
 
-    # 1. Strict Brand Matching if requested
+    # 1. Strict Store Filter if requested
+    if target_store:
+        mapped_products = [p for p in mapped_products if p.store.lower() == target_store.lower()]
+
+    # 2. Strict Brand Matching if requested
     if detected_brand:
-        d_lower = detected_brand.lower().replace("-", "")
+        d_clean = detected_brand.lower().replace("-", "").replace(" ", "")
         brand_filtered = [
             p for p in mapped_products
-            if d_lower in p.brand.lower().replace("-", "") or d_lower in p.model_name.lower().replace("-", "")
+            if d_clean in p.brand.lower().replace("-", "").replace(" ", "") or d_clean in p.model_name.lower().replace("-", "").replace(" ", "")
         ]
         if brand_filtered:
             mapped_products = brand_filtered
 
-    # 2. Strict Stock Requirement
+    # 3. Strict Stock Requirement
     if requires_stock:
         stock_filtered = [p for p in mapped_products if p.current_in_stock is not False]
         if stock_filtered:
             mapped_products = stock_filtered
 
-    # 3. Strict Discount / Offer Filter
+    # 4. Strict Discount / Offer Filter
     if requires_discount:
         discount_filtered = [
             p for p in mapped_products
@@ -679,7 +731,7 @@ async def advisor_chat(
         if discount_filtered:
             mapped_products = discount_filtered
 
-    # 4. Strict Numeric Price Range (min and max)
+    # 5. Strict Numeric Price Range (min and max)
     if budget_min is not None or budget_max is not None:
         range_filtered = []
         for p in mapped_products:
@@ -694,13 +746,13 @@ async def advisor_chat(
         if range_filtered:
             mapped_products = range_filtered
 
-    # 5. Sort Deterministically by Effective Price or Discount
+    # 6. Sort Deterministically by Effective Price or Discount
     if is_cheap_intent or budget_min is not None or budget_max is not None:
         mapped_products.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 99999999))
     elif is_expensive_intent:
         mapped_products.sort(key=lambda p: (p.current_price_discount or p.current_price_normal or 0), reverse=True)
 
-    # 6. Deduplicate similar model variants
+    # 7. Deduplicate similar model variants
     seen_model_keys = set()
     deduped_products = []
     for p in mapped_products:
@@ -713,7 +765,7 @@ async def advisor_chat(
             break
     mapped_products = deduped_products
 
-    # 7. Cross-Store Diversity Ranking (Preserving best price first)
+    # 8. Cross-Store Diversity Ranking (Preserving best price first)
     store_best = {}
     store_remaining = []
     for p in mapped_products:
@@ -760,6 +812,7 @@ async def advisor_chat(
             budget_min=budget_min,
             budget_max=budget_max,
             detected_brand=detected_brand,
+            target_store=target_store,
             requires_discount=requires_discount,
         )
 
