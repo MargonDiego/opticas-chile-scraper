@@ -42,10 +42,21 @@ async def get_api_key(api_key: Optional[str] = Security(API_KEY_HEADER)) -> str:
 
 
 async def get_admin_api_key(api_key: Optional[str] = Security(API_KEY_HEADER)) -> str:
-    """Validate incoming X-API-Key header against configured settings.ADMIN_API_KEY (or settings.API_KEY fallback)."""
-    configured_admin_key = settings.ADMIN_API_KEY or settings.API_KEY
+    """Validate incoming X-API-Key header against settings.ADMIN_API_KEY.
+
+    Does NOT fall back to settings.API_KEY: that key is distributed to the
+    public frontend bundle, so reusing it here would let any site visitor
+    reach admin-only routes (scrape trigger, job listing, exports).
+    """
+    configured_admin_key = settings.ADMIN_API_KEY
 
     if not configured_admin_key or not configured_admin_key.strip():
+        if settings.ENVIRONMENT == "production":
+            logger.error("ADMIN_API_KEY is not configured in production - denying admin access")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Admin API is not configured",
+            )
         return "unprotected"
 
     if not api_key:
@@ -74,12 +85,17 @@ class IPRateLimiter:
         self._ai_history: dict[str, list[float]] = defaultdict(list)
 
     def _get_client_ip(self, request: Request) -> str:
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        real_ip = request.headers.get("X-Real-IP")
-        if real_ip:
-            return real_ip.strip()
+        # Only trust proxy-supplied headers when explicitly running behind a
+        # trusted reverse proxy (Coolify/Traefik/nginx). Otherwise these
+        # headers are attacker-controlled and let anyone spoof a new "IP" on
+        # every request to bypass the rate limit entirely.
+        if settings.TRUST_PROXY_HEADERS:
+            forwarded = request.headers.get("X-Forwarded-For")
+            if forwarded:
+                return forwarded.split(",")[0].strip()
+            real_ip = request.headers.get("X-Real-IP")
+            if real_ip:
+                return real_ip.strip()
         if request.client:
             return request.client.host
         return "127.0.0.1"

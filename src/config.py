@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     RATE_LIMIT_AI_PER_MINUTE: int = 20
     CORS_ORIGINS: Union[List[str], str] = ["*"]
     ENABLE_SECURITY_HEADERS: bool = True
+    # Only enable when a reverse proxy (Coolify/Traefik/nginx) sits in front
+    # and is known to overwrite X-Forwarded-For/X-Real-IP on every request.
+    TRUST_PROXY_HEADERS: bool = False
 
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///data/opticas.db"
@@ -55,3 +58,9 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+if settings.ENVIRONMENT == "production" and not (settings.API_KEY and settings.API_KEY.strip()):
+    raise RuntimeError(
+        "API_KEY must be set when ENVIRONMENT=production. "
+        "Refusing to start in unprotected mode."
+    )
