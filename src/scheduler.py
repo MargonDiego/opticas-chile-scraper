@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from src.config import settings
 from src.scrapers.registry import get_available_stores, execute_scrape_for_store
 
@@ -22,17 +23,16 @@ async def scheduled_scrape_all_stores():
 
 
 def start_scheduler():
-    """Start APScheduler background scheduler."""
-    interval_hours = settings.AUTO_SCRAPE_INTERVAL_HOURS
+    """Start APScheduler background scheduler with fixed cron triggers (04:00 and 16:00)."""
+    trigger = CronTrigger(hour="4,16", minute="0")
     scheduler.add_job(
         scheduled_scrape_all_stores,
-        "interval",
-        hours=interval_hours,
+        trigger=trigger,
         id="scrape_all_optical_stores",
         replace_existing=True,
     )
     scheduler.start()
-    logger.info(f"Scraper scheduler started. Interval: every {interval_hours} hours.")
+    logger.info("Scraper scheduler started with fixed daily cron schedule at 04:00 and 16:00.")
 
 
 def shutdown_scheduler():
