@@ -38,7 +38,7 @@ from src.models import (
 )
 from src.scheduler import shutdown_scheduler, start_scheduler
 from src.scrapers.registry import execute_scrape_for_store, get_available_stores
-from src.security import get_api_key
+from src.security import get_admin_api_key, get_api_key, RateLimitMiddleware
 from src.services.ollama import ollama_service
 
 logging.basicConfig(
@@ -85,7 +85,10 @@ app = FastAPI(
 # 1. Add Security Headers Middleware
 app.add_middleware(SecurityHeadersMiddleware)
 
-# 2. Add CORS Middleware
+# 2. Add Rate Limiter Middleware (DDoS and AI saturation protection)
+app.add_middleware(RateLimitMiddleware)
+
+# 3. Add CORS Middleware
 cors_origins = settings.CORS_ORIGINS if isinstance(settings.CORS_ORIGINS, list) else [settings.CORS_ORIGINS]
 app.add_middleware(
     CORSMiddleware,
@@ -1183,7 +1186,7 @@ async def advisor_chat(
     )
 
 
-@app.post("/api/scrape/trigger", response_model=ScrapeTriggerResponse, tags=["Scraping"], dependencies=[Depends(get_api_key)])
+@app.post("/api/scrape/trigger", response_model=ScrapeTriggerResponse, tags=["Scraping"], dependencies=[Depends(get_admin_api_key)])
 async def trigger_scrape(
     request: ScrapeTriggerRequest,
     background_tasks: BackgroundTasks,
@@ -1202,7 +1205,7 @@ async def trigger_scrape(
     )
 
 
-@app.get("/api/scrape/jobs", response_model=List[ScrapeJob], tags=["Scraping"], dependencies=[Depends(get_api_key)])
+@app.get("/api/scrape/jobs", response_model=List[ScrapeJob], tags=["Scraping"], dependencies=[Depends(get_admin_api_key)])
 async def list_scrape_jobs(
     limit: int = 20,
     session: AsyncSession = Depends(get_session),
@@ -1212,7 +1215,7 @@ async def list_scrape_jobs(
     return res.scalars().all()
 
 
-@app.get("/api/export/csv", tags=["Export"], dependencies=[Depends(get_api_key)])
+@app.get("/api/export/csv", tags=["Export"], dependencies=[Depends(get_admin_api_key)])
 async def export_csv(session: AsyncSession = Depends(get_session)):
     stmt = select(Product).options(selectinload(Product.price_snapshots))
     res = await session.execute(stmt)
@@ -1248,7 +1251,7 @@ async def export_csv(session: AsyncSession = Depends(get_session)):
     )
 
 
-@app.get("/api/export/json", tags=["Export"], dependencies=[Depends(get_api_key)])
+@app.get("/api/export/json", tags=["Export"], dependencies=[Depends(get_admin_api_key)])
 async def export_json(session: AsyncSession = Depends(get_session)):
     stmt = select(Product).options(selectinload(Product.price_snapshots))
     res = await session.execute(stmt)

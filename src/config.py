@@ -11,6 +11,10 @@ class Settings(BaseSettings):
 
     # Cybersecurity & Authentication
     API_KEY: Optional[str] = None
+    ADMIN_API_KEY: Optional[str] = None
+    ENABLE_RATE_LIMITING: bool = True
+    RATE_LIMIT_PUBLIC_PER_MINUTE: int = 120
+    RATE_LIMIT_AI_PER_MINUTE: int = 20
     CORS_ORIGINS: Union[List[str], str] = ["*"]
     ENABLE_SECURITY_HEADERS: bool = True
 
