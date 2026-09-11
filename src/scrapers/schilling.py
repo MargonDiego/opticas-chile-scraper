@@ -31,33 +31,34 @@ class SchillingScraper(BaseOpticalScraper):
             for cat in categories:
                 for page in range(1, limit_pages + 1):
                     url = f"{self.base_url}{cat}?p={page}"
-                    try:
-                        res = await client.get(url)
-                        if res.status_code != 200:
-                            break
+                    res = await self.fetch_with_retry(client, "GET", url)
+                    if res is None:
+                        logger.error(f"Schilling {url} unreachable after retries, stopping category {cat}")
+                        break
+                    if res.status_code != 200:
+                        logger.warning(f"Schilling {url} returned status {res.status_code}")
+                        break
 
-                        soup = BeautifulSoup(res.text, "lxml")
-                        cards = soup.select(".product-item-info")
-                        if not cards:
-                            break
+                    soup = BeautifulSoup(res.text, "lxml")
+                    cards = soup.select(".product-item-info")
+                    if not cards:
+                        if page == 1:
+                            logger.error(f"Schilling {cat} returned zero cards on page 1 - possible selector break, not end of catalog")
+                        break
 
-                        page_has_items = False
-                        for card in cards:
-                            item = self._parse_card(card, cat)
-                            if item:
-                                page_has_items = True
-                                yield item
+                    page_has_items = False
+                    for card in cards:
+                        item = self._parse_card(card, cat)
+                        if item:
+                            page_has_items = True
+                            yield item
 
-                        if not page_has_items:
-                            break
+                    if not page_has_items:
+                        break
 
-                        # Stop if no "next" page button in toolbar
-                        next_btn = soup.select_one(".action.next")
-                        if not next_btn:
-                            break
-
-                    except Exception as e:
-                        logger.error(f"Error scraping Schilling {url}: {e}")
+                    # Stop if no "next" page button in toolbar
+                    next_btn = soup.select_one(".action.next")
+                    if not next_btn:
                         break
 
     def _parse_card(self, card, cat_path: str = "") -> Optional[ScrapedItem]:

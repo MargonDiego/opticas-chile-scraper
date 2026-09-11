@@ -65,6 +65,59 @@ def detect_category(text: str, fallback_text: str = "") -> str:
     return CategoryEnum.OTRO.value
 
 
+# Known eyewear/contact-lens brands, keyed by the substring found in a raw
+# product name/title. Shared across scrapers so each store doesn't repeat
+# its own copy of the same brand table with slightly different matching.
+KNOWN_EYEWEAR_BRANDS: dict[str, str] = {
+    "ray-ban": "Ray-Ban",
+    "ray ban": "Ray-Ban",
+    "rayban": "Ray-Ban",
+    "oakley": "Oakley",
+    "vogue": "Vogue",
+    "armani exchange": "Armani Exchange",
+    "emporio armani": "Emporio Armani",
+    "michael kors": "Michael Kors",
+    "arnette": "Arnette",
+    "carrera": "Carrera",
+    "police": "Police",
+    "hugo boss": "Boss",
+    "boss": "Boss",
+    "polo ralph lauren": "Polo Ralph Lauren",
+    "ralph": "Ralph",
+    "prada": "Prada",
+    "versace": "Versace",
+    "gucci": "Gucci",
+    "burberry": "Burberry",
+    "acuvue": "Acuvue",
+    "biofinity": "CooperVision",
+    "clariti": "CooperVision",
+    "avaira": "CooperVision",
+    "proclear": "CooperVision",
+    "coopervision": "CooperVision",
+    "air optix": "Alcon",
+    "dailies": "Alcon",
+    "opti-free": "Alcon",
+    "alcon": "Alcon",
+    "soflens": "Bausch + Lomb",
+    "biotrue": "Bausch + Lomb",
+    "purevision": "Bausch + Lomb",
+    "renu": "Bausch + Lomb",
+    "bausch + lomb": "Bausch + Lomb",
+    "bausch & lomb": "Bausch + Lomb",
+}
+
+
+def detect_known_brand(name: str, default: str) -> str:
+    """Match a raw product name against KNOWN_EYEWEAR_BRANDS, falling back
+    to `default` (typically the store's own name or the name's first word)
+    when nothing matches."""
+    name_lower = name.lower()
+    for needle, brand in KNOWN_EYEWEAR_BRANDS.items():
+        if needle in name_lower:
+            return brand
+    return default
+
+
 class BaseOpticalScraper(abc.ABC):
     """Abstract base scraper for Chilean optical store chains."""
 
@@ -89,6 +142,101 @@ class BaseOpticalScraper(abc.ABC):
                 max_connections=settings.SCRAPER_MAX_CONCURRENCY,
             ),
         )
+
+    # Status codes worth retrying: rate limiting and transient upstream/server
+    # failures. Other 4xx codes (404, 403, etc.) are treated as permanent -
+    # retrying them would just waste requests against the target store.
+    RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
+    async def fetch_with_retry(
+        self, client: httpx.AsyncClient, method: str, url: str, **kwargs
+    ) -> Optional[httpx.Response]:
+        """Fetch a URL with exponential-backoff retries on transient failures.
+
+        Retries network errors (timeouts, connection resets) and retryable
+        HTTP status codes up to settings.SCRAPER_RETRY_ATTEMPTS times. Returns
+        the last response received (which may be a non-2xx status the caller
+        must still check) or None if every attempt raised a transport error.
+        """
+        attempts = max(1, settings.SCRAPER_RETRY_ATTEMPTS)
+        last_response: Optional[httpx.Response] = None
+
+        for attempt in range(1, attempts + 1):
+            try:
+                response = await client.request(method, url, **kwargs)
+            except (httpx.TimeoutException, httpx.TransportError) as e:
+                if attempt == attempts:
+                    logger.error(
+                        f"[{self.store_name}] {method} {url} failed after {attempts} attempts: {e}"
+                    )
+                    return None
+                logger.warning(
+                    f"[{self.store_name}] {method} {url} attempt {attempt}/{attempts} failed ({e}), retrying..."
+                )
+            else:
+                last_response = response
+                if response.status_code not in self.RETRYABLE_STATUS_CODES:
+                    return response
+                if attempt == attempts:
+                    logger.error(
+                        f"[{self.store_name}] {method} {url} still returning {response.status_code} after {attempts} attempts"
+                    )
+                    return response
+                logger.warning(
+                    f"[{self.store_name}] {method} {url} attempt {attempt}/{attempts} got status {response.status_code}, retrying..."
+                )
+
+            await asyncio.sleep(min(2 ** (attempt - 1), 10))
+
+        return last_response
+
+    def parse_shopify_product(self, prod: dict, default_vendor: str) -> Optional[ScrapedItem]:
+        """Parse a single item from a public Shopify `products.json` feed.
+
+        Shared by every scraper backed by the Shopify storefront API
+        (gmo, karun, place_vendome), which previously each carried their own
+        copy of this exact parsing logic.
+        """
+        try:
+            prod_id = str(prod.get("id"))
+            title = prod.get("title", "")
+            vendor = prod.get("vendor") or default_vendor
+            handle = prod.get("handle", "")
+            url = f"{self.base_url}/products/{handle}"
+
+            variants = prod.get("variants", [])
+            if not variants:
+                return None
+            first_var = variants[0]
+            price = clean_clp_price(first_var.get("price"))
+            compare_price = clean_clp_price(first_var.get("compare_at_price"))
+
+            price_normal = compare_price if compare_price and compare_price > price else price
+            price_discount = price if compare_price and compare_price > price else None
+
+            if not price_normal or price_normal <= 0:
+                return None
+
+            images = prod.get("images", [])
+            image_url = images[0].get("src") if images else None
+            in_stock = first_var.get("available", True)
+
+            return ScrapedItem(
+                store=self.store_name,
+                store_product_id=prod_id,
+                brand=vendor,
+                model_name=title,
+                category=detect_category(title + " " + prod.get("product_type", "")),
+                url=url,
+                price_normal=price_normal,
+                price_discount=price_discount,
+                image_url=image_url,
+                description=prod.get("body_html"),
+                is_in_stock=in_stock,
+            )
+        except Exception as e:
+            logger.debug(f"[{self.store_name}] Error parsing Shopify item: {e}")
+            return None
 
     @abc.abstractmethod
     async def scrape_catalog(

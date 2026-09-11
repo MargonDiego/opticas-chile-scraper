@@ -2,7 +2,7 @@ import logging
 from typing import AsyncGenerator, Optional
 import httpx
 from bs4 import BeautifulSoup
-from src.scrapers.base import BaseOpticalScraper, ScrapedItem, clean_clp_price, detect_category
+from src.scrapers.base import BaseOpticalScraper, ScrapedItem, clean_clp_price, detect_category, detect_known_brand
 
 logger = logging.getLogger(__name__)
 
@@ -30,31 +30,32 @@ class RotterKraussScraper(BaseOpticalScraper):
                     start = page * page_size
                     sep = "&" if "?" in cat_path else "?"
                     url = f"{self.base_url}{cat_path}{sep}sz={page_size}&start={start}"
-                    try:
-                        res = await client.get(url)
-                        if res.status_code != 200:
-                            break
+                    res = await self.fetch_with_retry(client, "GET", url)
+                    if res is None:
+                        logger.error(f"RyK {url} unreachable after retries, stopping category {cat_path}")
+                        break
+                    if res.status_code != 200:
+                        logger.warning(f"RyK {url} returned status {res.status_code}")
+                        break
 
-                        soup = BeautifulSoup(res.text, "lxml")
-                        # Pick top-level product containers with data-pid to avoid duplicates
-                        cards = soup.select(".product[data-pid]")
-                        if not cards:
-                            cards = soup.select(".product-tile")
-                        if not cards:
-                            break
+                    soup = BeautifulSoup(res.text, "lxml")
+                    # Pick top-level product containers with data-pid to avoid duplicates
+                    cards = soup.select(".product[data-pid]")
+                    if not cards:
+                        cards = soup.select(".product-tile")
+                    if not cards:
+                        if page == 0:
+                            logger.error(f"RyK {cat_path} returned zero cards on the first page - possible selector break, not end of catalog")
+                        break
 
-                        page_has_items = False
-                        for card in cards:
-                            item = self._parse_tile(card, cat_path)
-                            if item:
-                                page_has_items = True
-                                yield item
+                    page_has_items = False
+                    for card in cards:
+                        item = self._parse_tile(card, cat_path)
+                        if item:
+                            page_has_items = True
+                            yield item
 
-                        if not page_has_items or len(cards) < page_size:
-                            break
-
-                    except Exception as e:
-                        logger.error(f"Error scraping RyK {url}: {e}")
+                    if not page_has_items or len(cards) < page_size:
                         break
 
     def _parse_tile(self, card, cat_path: str = "") -> Optional[ScrapedItem]:
@@ -141,28 +142,8 @@ class RotterKraussScraper(BaseOpticalScraper):
                         image_url = src
 
             # 5. Brand detection
-            brand = name.split()[0] if name else "Rotter & Krauss"
-            name_lower = name.lower()
-            if name_lower.startswith("ray ban") or name_lower.startswith("ray-ban"):
-                brand = "Ray-Ban"
-            elif name_lower.startswith("oakley"):
-                brand = "Oakley"
-            elif name_lower.startswith("vogue"):
-                brand = "Vogue"
-            elif name_lower.startswith("armani exchange"):
-                brand = "Armani Exchange"
-            elif name_lower.startswith("emporio armani"):
-                brand = "Emporio Armani"
-            elif name_lower.startswith("michael kors"):
-                brand = "Michael Kors"
-            elif name_lower.startswith("acuvue"):
-                brand = "Acuvue"
-            elif name_lower.startswith("alcon") or name_lower.startswith("dailies") or name_lower.startswith("air optix"):
-                brand = "Alcon"
-            elif name_lower.startswith("bausch + lomb") or name_lower.startswith("bausch & lomb") or name_lower.startswith("soflens") or name_lower.startswith("biotrue"):
-                brand = "Bausch + Lomb"
-            elif name_lower.startswith("coopervision") or name_lower.startswith("biofinity") or name_lower.startswith("clariti") or name_lower.startswith("proclear"):
-                brand = "CooperVision"
+            default_brand = name.split()[0] if name else "Rotter & Krauss"
+            brand = detect_known_brand(name, default=default_brand)
 
             return ScrapedItem(
                 store=self.store_name,

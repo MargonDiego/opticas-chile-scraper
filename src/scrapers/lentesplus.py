@@ -2,7 +2,7 @@ import logging
 from typing import AsyncGenerator, Optional
 import httpx
 from bs4 import BeautifulSoup
-from src.scrapers.base import BaseOpticalScraper, ScrapedItem, clean_clp_price, detect_category
+from src.scrapers.base import BaseOpticalScraper, ScrapedItem, clean_clp_price, detect_category, detect_known_brand
 
 logger = logging.getLogger(__name__)
 
@@ -64,33 +64,38 @@ class LentesplusScraper(BaseOpticalScraper):
 
         async with httpx.AsyncClient(headers=headers, timeout=25.0) as client:
             for page in range(1, limit_pages + 1):
-                try:
-                    payload = {
-                        "query": query,
-                        "variables": {
-                            "pageSize": page_size,
-                            "currentPage": page,
-                        },
-                    }
-                    res = await client.post(self.graphql_url, json=payload)
-                    if res.status_code != 200:
-                        logger.error(f"Lentesplus GraphQL returned status {res.status_code}")
-                        break
+                payload = {
+                    "query": query,
+                    "variables": {
+                        "pageSize": page_size,
+                        "currentPage": page,
+                    },
+                }
+                res = await self.fetch_with_retry(client, "POST", self.graphql_url, json=payload)
+                if res is None:
+                    logger.error(f"Lentesplus GraphQL page {page} unreachable after retries, stopping catalog scrape")
+                    break
+                if res.status_code != 200:
+                    logger.warning(f"Lentesplus GraphQL returned status {res.status_code}")
+                    break
 
+                try:
                     data = res.json()
                     products_data = data.get("data", {}).get("products", {})
                     items = products_data.get("items", [])
-                    if not items:
-                        break
-
-                    for p in items:
-                        item = self._parse_graphql_item(p)
-                        if item:
-                            yield item
-
                 except Exception as e:
-                    logger.error(f"Error scraping Lentesplus page {page}: {e}")
+                    logger.error(f"Error parsing Lentesplus GraphQL page {page}: {e}")
                     break
+
+                if not items:
+                    if page == 1:
+                        logger.error("Lentesplus GraphQL returned zero items on page 1 - possible API/selector break, not end of catalog")
+                    break
+
+                for p in items:
+                    item = self._parse_graphql_item(p)
+                    if item:
+                        yield item
 
     def _parse_graphql_item(self, p: dict) -> Optional[ScrapedItem]:
         try:
@@ -125,18 +130,7 @@ class LentesplusScraper(BaseOpticalScraper):
             is_in_stock = p.get("stock_status") == "IN_STOCK"
 
             # Brand detection
-            brand = "Lentesplus"
-            known_brands = [
-                "Ray-Ban", "RayBan", "Oakley", "Vogue", "Armani Exchange", "Emporio Armani",
-                "Michael Kors", "Arnette", "Carrera", "Police", "Hugo Boss", "Boss",
-                "Ralph", "Polo Ralph Lauren", "Prada", "Versace", "Gucci", "Burberry",
-                "Acuvue", "Biofinity", "Air Optix", "Soflens", "PureVision", "Biotrue",
-                "Dailies", "Clariti", "Avaira", "Ultra", "Opti-Free", "Renu", "Alcon", "Bausch + Lomb"
-            ]
-            for kb in known_brands:
-                if kb.lower() in name.lower():
-                    brand = "Ray-Ban" if kb.lower() in ["ray-ban", "rayban"] else kb
-                    break
+            brand = detect_known_brand(name, default="Lentesplus")
 
             return ScrapedItem(
                 store=self.store_name,
