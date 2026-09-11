@@ -125,7 +125,7 @@ class ProductDetailRead(ProductRead):
 
 
 class SemanticSearchRequest(SQLModel):
-    query: str
+    query: str = Field(max_length=300)
     store: Optional[str] = None
     brand: Optional[str] = None
     category: Optional[str] = None
@@ -134,7 +134,7 @@ class SemanticSearchRequest(SQLModel):
     sort_by: Optional[str] = None
     min_price: Optional[int] = None
     max_price: Optional[int] = None
-    limit: int = 60
+    limit: int = Field(default=60, ge=1, le=200)
 
 
 class SemanticSearchResult(ProductRead):
@@ -142,7 +142,7 @@ class SemanticSearchResult(ProductRead):
 
 
 class AdvisorChatRequest(SQLModel):
-    message: str
+    message: str = Field(max_length=500)
     store: Optional[str] = None
     category: Optional[str] = None
 
@@ -154,7 +154,7 @@ class AdvisorChatResponse(SQLModel):
 
 class ScrapeTriggerRequest(SQLModel):
     store: str = "all"
-    max_pages: Optional[int] = None
+    max_pages: Optional[int] = Field(default=None, ge=1, le=100)
 
 
 class ScrapeTriggerResponse(SQLModel):
