@@ -170,3 +170,35 @@ class CatalogStatsRead(SQLModel):
     total_in_stock: int
     by_store: dict
     by_category: dict
+
+
+class StorePriceMatch(SQLModel):
+    product_id: str
+    store: str
+    brand: str
+    model_name: str
+    url: str
+    image_url: Optional[str] = None
+    price_normal: Optional[int] = None
+    price_discount: Optional[int] = None
+    effective_price: Optional[int] = None
+    discount_percentage: Optional[float] = None
+    is_in_stock: bool = True
+    savings_vs_base: int = 0
+    is_base_product: bool = False
+
+
+class ProductComparisonResponse(SQLModel):
+    canonical_key: str
+    base_product_id: str
+    brand: str
+    canonical_model: str
+    category: str
+    total_stores: int
+    total_listings: int
+    cheapest_store: Optional[str] = None
+    lowest_price: Optional[int] = None
+    highest_price: Optional[int] = None
+    max_arbitrage_amount: int = 0
+    max_arbitrage_percentage: float = 0.0
+    matches: List[StorePriceMatch] = []

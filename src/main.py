@@ -25,6 +25,7 @@ from src.models import (
     PriceSnapshot,
     PriceSnapshotRead,
     Product,
+    ProductComparisonResponse,
     ProductDetailRead,
     ProductRead,
     ScrapeJob,
@@ -33,6 +34,7 @@ from src.models import (
     SemanticSearchRequest,
     SemanticSearchResult,
     StoreEnum,
+    StorePriceMatch,
 )
 from src.scheduler import shutdown_scheduler, start_scheduler
 from src.scrapers.registry import execute_scrape_for_store, get_available_stores
@@ -412,6 +414,153 @@ async def get_product_detail(
             for s in sorted_snaps
         ],
     )
+
+
+CANONICAL_MODEL_REGEX = re.compile(
+    r'\b(?:0?([a-zA-Z]{1,4})\s*[-_]?\s*(\d{3,5}[a-zA-Z]{0,3}))\b',
+    re.IGNORECASE,
+)
+
+EYEWEAR_STOPWORDS = {
+    "lentes", "lente", "anteojos", "anteojo", "gafas", "gafa", "armazon", "armazón", "armazones",
+    "marcos", "marco", "de", "sol", "opticos", "optico", "ópticos", "óptico", "contacto",
+    "caja", "pack", "unidades", "unidad", "uds", "con", "para", "hombre", "mujer", "unisex",
+    "polarizado", "polarizada", "polarizados", "clipon", "clip-on", "graduable", "lentesplus",
+    "gmo", "ryk", "schilling", "econopticas", "opv"
+}
+
+
+def _extract_canonical_key(prod: ProductRead | Product) -> tuple[str, str]:
+    brand = (prod.brand or "").strip().lower()
+    if "ray" in brand and "ban" in brand:
+        brand = "ray-ban"
+    elif "oakley" in brand:
+        brand = "oakley"
+    elif "karun" in brand or "karün" in brand:
+        brand = "karün"
+    elif "vogue" in brand:
+        brand = "vogue"
+    elif "arnette" in brand:
+        brand = "arnette"
+    elif "acuvue" in brand:
+        brand = "acuvue"
+    elif "alcon" in brand:
+        brand = "alcon"
+    elif "bausch" in brand or "lomb" in brand:
+        brand = "bausch-lomb"
+    elif "coopervision" in brand:
+        brand = "coopervision"
+
+    model_text = f"{prod.model_name or ''} {getattr(prod, 'store_product_id', '') or ''}".strip()
+    match = CANONICAL_MODEL_REGEX.search(model_text)
+    if match:
+        prefix = match.group(1).upper()
+        if prefix.startswith("0") and len(prefix) > 1:
+            prefix = prefix[1:]
+        code_num = match.group(2).upper()
+        clean_code = f"{prefix}{code_num}"
+        return f"{brand}:{clean_code.lower()}", clean_code
+
+    raw_tokens = re.findall(r'[a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]+', model_text.lower())
+    clean_tokens = [t for t in raw_tokens if t not in EYEWEAR_STOPWORDS and len(t) > 1]
+    if clean_tokens:
+        key_tokens = clean_tokens[:3]
+        clean_line = " ".join(key_tokens).title()
+        return f"{brand}:{'_'.join(key_tokens)}", clean_line
+
+    fallback = (getattr(prod, "store_product_id", "") or prod.id).lower()
+    return f"{brand}:{fallback}", prod.model_name or ""
+
+
+@app.get("/api/products/{product_id}/compare", response_model=ProductComparisonResponse, tags=["Products"], dependencies=[Depends(get_api_key)])
+async def compare_product_across_stores(
+    product_id: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """Compare a given product across all Chilean optical chains using canonical model clustering."""
+    all_products, _ = await _get_cached_catalog(session)
+    
+    # 1. Find base product
+    base_prod = next((p for p in all_products if p.id == product_id), None)
+    if not base_prod:
+        # Fallback to direct DB query if not in memory cache
+        stmt = select(Product).where(Product.id == product_id).options(selectinload(Product.price_snapshots))
+        res = await session.execute(stmt)
+        db_prod = res.scalar_one_or_none()
+        if not db_prod:
+            raise HTTPException(status_code=404, detail="Product not found")
+        base_prod = _map_product_read(db_prod)
+
+    canonical_key, canonical_model = _extract_canonical_key(base_prod)
+    base_effective_price = base_prod.current_price_discount or base_prod.current_price_normal or 0
+
+    # 2. Find all matches across the catalog
+    matches_raw = []
+    for p in all_products:
+        p_key, _ = _extract_canonical_key(p)
+        if p_key == canonical_key:
+            matches_raw.append(p)
+
+    # 3. Build StorePriceMatch list
+    matches: List[StorePriceMatch] = []
+    prices: List[int] = []
+    stores_present = set()
+
+    for p in matches_raw:
+        eff_price = p.current_price_discount or p.current_price_normal
+        if eff_price and eff_price > 0:
+            prices.append(eff_price)
+        stores_present.add(p.store)
+
+        disc_pct = None
+        if p.current_price_discount and p.current_price_normal and p.current_price_discount < p.current_price_normal:
+            disc_pct = round(((p.current_price_normal - p.current_price_discount) / p.current_price_normal) * 100, 1)
+
+        savings = (base_effective_price - eff_price) if (base_effective_price > 0 and eff_price and eff_price > 0) else 0
+
+        matches.append(
+            StorePriceMatch(
+                product_id=p.id,
+                store=p.store,
+                brand=p.brand,
+                model_name=p.model_name,
+                url=p.url,
+                image_url=p.image_url,
+                price_normal=p.current_price_normal,
+                price_discount=p.current_price_discount,
+                effective_price=eff_price,
+                discount_percentage=disc_pct,
+                is_in_stock=p.current_in_stock if p.current_in_stock is not None else True,
+                savings_vs_base=savings,
+                is_base_product=(p.id == base_prod.id),
+            )
+        )
+
+    # Sort matches: in-stock first, then lowest price first
+    matches.sort(key=lambda m: (not m.is_in_stock, m.effective_price or 999999999))
+
+    lowest_price = min(prices) if prices else None
+    highest_price = max(prices) if prices else None
+    max_arbitrage = (highest_price - lowest_price) if (lowest_price and highest_price) else 0
+    max_arbitrage_pct = round(((highest_price - lowest_price) / highest_price) * 100, 1) if (lowest_price and highest_price and highest_price > 0) else 0.0
+    cheapest_match = next((m for m in matches if m.effective_price == lowest_price), None)
+
+    return ProductComparisonResponse(
+        canonical_key=canonical_key,
+        base_product_id=base_prod.id,
+        brand=base_prod.brand,
+        canonical_model=canonical_model,
+        category=base_prod.category,
+        total_stores=len(stores_present),
+        total_listings=len(matches),
+        cheapest_store=cheapest_match.store if cheapest_match else None,
+        lowest_price=lowest_price,
+        highest_price=highest_price,
+        max_arbitrage_amount=max_arbitrage,
+        max_arbitrage_percentage=max_arbitrage_pct,
+        matches=matches,
+    )
+
 
 
 @app.post("/api/products/search/semantic", response_model=List[SemanticSearchResult], tags=["AI & Vector Search"], dependencies=[Depends(get_api_key)])
