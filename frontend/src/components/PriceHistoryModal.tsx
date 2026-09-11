@@ -157,24 +157,24 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
   return (
     <Dialog open={!!productId} onOpenChange={(open) => !open && onClose()}>
       <DialogContent onClose={onClose} className="p-0 overflow-hidden max-w-3xl border-border bg-card">
-        {/* Modal Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/30">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+        {/* Modal Header with safe padding for close button */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/30 pr-14">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
               <History className="w-4 h-4" />
             </div>
-            <div>
-              <DialogTitle className="text-base font-bold text-foreground">
-                Análisis de Precios & Comparador Multi-Tienda
+            <div className="min-w-0">
+              <DialogTitle className="text-base font-bold text-foreground leading-snug truncate">
+                Análisis de Precios & Comparador
               </DialogTitle>
-              <p className="text-xs text-muted-foreground">
-                Monitoreo histórico y arbitraje en ópticas chilenas
+              <p className="text-xs text-muted-foreground truncate">
+                Monitoreo histórico y arbitraje multi-tienda
               </p>
             </div>
           </div>
 
           {/* Navigation Tabs */}
-          <div className="flex items-center bg-muted/60 p-1 rounded-xl border border-border/80 text-xs font-semibold">
+          <div className="flex items-center bg-muted/70 p-1 rounded-xl border border-border/80 text-xs font-semibold shrink-0 self-start sm:self-auto">
             <button
               onClick={() => setActiveTab("history")}
               className={`px-3 py-1.5 rounded-lg transition-all ${
@@ -204,7 +204,7 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
         </div>
 
         {/* Modal Scrollable Body */}
-        <div className="p-6 max-h-[80vh] overflow-y-auto space-y-6">
+        <div className="p-4 sm:p-6 max-h-[80vh] overflow-y-auto space-y-5">
           {loading ? (
             <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
               <div className="w-8 h-8 border-3 border-primary border-t-transparent rounded-full animate-spin" />
@@ -212,47 +212,50 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
             </div>
           ) : product ? (
             <>
-              {/* Product Specimen Summary Banner */}
-              <div className="flex items-center gap-4 bg-muted/20 p-4 rounded-2xl border border-border">
-                {product.image_url ? (
-                  <img
-                    src={product.image_url}
-                    alt={product.model_name}
-                    className="w-16 h-16 object-contain bg-white rounded-xl p-1.5 border border-border/60 shadow-xs"
-                  />
-                ) : (
-                  <div className="w-16 h-16 bg-muted rounded-xl flex items-center justify-center text-xs font-bold text-muted-foreground">
-                    {product.brand}
-                  </div>
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <StoreBadge store={product.store} />
-                    <span className="text-xs font-mono font-bold uppercase tracking-wider text-muted-foreground">
+              {/* Product Specimen Summary Banner (Responsive) */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-muted/20 p-4 rounded-2xl border border-border">
+                <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                  {product.image_url ? (
+                    <img
+                      src={product.image_url}
+                      alt={product.model_name}
+                      className="w-14 h-14 sm:w-16 sm:h-16 object-contain bg-white rounded-xl p-1 border border-border/60 shadow-xs shrink-0"
+                    />
+                  ) : (
+                    <div className="w-14 h-14 sm:w-16 sm:h-16 bg-muted rounded-xl flex items-center justify-center text-xs font-bold text-muted-foreground shrink-0">
                       {product.brand}
-                    </span>
-                  </div>
-                  <h4 className="font-semibold text-sm text-foreground truncate">
-                    {product.model_name}
-                  </h4>
-                  <div className="flex items-baseline gap-2 mt-1">
-                    <span className="text-lg font-black font-mono text-foreground">
-                      {formatCLP(currentEffectivePrice)}
-                    </span>
-                    {product.current_price_discount &&
-                      product.current_price_normal &&
-                      product.current_price_discount < product.current_price_normal && (
-                        <span className="text-xs font-mono line-through text-muted-foreground">
-                          {formatCLP(product.current_price_normal)}
-                        </span>
-                      )}
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <StoreBadge store={product.store} />
+                      <span className="text-xs font-mono font-bold uppercase tracking-wider text-muted-foreground">
+                        {product.brand}
+                      </span>
+                    </div>
+                    <h4 className="font-semibold text-sm text-foreground truncate">
+                      {product.model_name}
+                    </h4>
+                    <div className="flex items-baseline gap-2 mt-1">
+                      <span className="text-base sm:text-lg font-black font-mono text-foreground">
+                        {formatCLP(currentEffectivePrice)}
+                      </span>
+                      {product.current_price_discount &&
+                        product.current_price_normal &&
+                        product.current_price_discount < product.current_price_normal && (
+                          <span className="text-xs font-mono line-through text-muted-foreground">
+                            {formatCLP(product.current_price_normal)}
+                          </span>
+                        )}
+                    </div>
                   </div>
                 </div>
+
                 <a
                   href={product.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-all shadow-xs shrink-0"
+                  className="inline-flex items-center justify-center gap-1.5 text-xs font-bold px-4 py-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-all shadow-xs shrink-0 w-full sm:w-auto"
                 >
                   <span>Ver Tienda</span>
                   <ExternalLink className="w-3.5 h-3.5" />
@@ -261,9 +264,9 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
 
               {/* TAB 1: HISTORICAL PRICE FLUCTUATIONS (KEEPA/KNASTA STYLE) */}
               {activeTab === "history" && (
-                <div className="space-y-6">
+                <div className="space-y-5">
                   {/* Historical Key Metrics Cards */}
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="p-3.5 rounded-xl border border-border bg-card/60 space-y-1">
                       <p className="text-[11px] font-mono font-semibold uppercase tracking-wider text-muted-foreground">
                         Mínimo Histórico
@@ -311,13 +314,13 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
 
                   {/* Interactive SVG Price Chart */}
                   <div className="p-4 rounded-2xl border border-border bg-zinc-50 dark:bg-zinc-950/60 space-y-3">
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                       <h5 className="text-xs font-mono font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                         <TrendingDown className="w-4 h-4 text-primary" />
                         Serie Temporal de Fluctuaciones
                       </h5>
                       {hoveredPoint ? (
-                        <div className="text-right font-mono text-xs">
+                        <div className="font-mono text-xs">
                           <span className="text-muted-foreground mr-2">{hoveredPoint.dateStr}:</span>
                           <span className="font-bold text-foreground">
                             {formatCLP(hoveredPoint.effectivePrice)}
@@ -371,11 +374,11 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
                           >
                             <div className="flex items-center gap-3">
                               {isDiscount ? (
-                                <div className="w-8 h-8 rounded-full bg-emerald-500/15 text-emerald-600 flex items-center justify-center">
+                                <div className="w-8 h-8 rounded-full bg-emerald-500/15 text-emerald-600 flex items-center justify-center shrink-0">
                                   <TrendingDown className="w-4 h-4" />
                                 </div>
                               ) : (
-                                <div className="w-8 h-8 rounded-full bg-slate-500/15 text-slate-600 flex items-center justify-center">
+                                <div className="w-8 h-8 rounded-full bg-slate-500/15 text-slate-600 flex items-center justify-center shrink-0">
                                   <TrendingUp className="w-4 h-4" />
                                 </div>
                               )}
@@ -424,7 +427,7 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
 
               {/* TAB 2: MULTI-STORE CROSS-STORE COMPARISON & ARBITRAGE (FEATURE 1) */}
               {activeTab === "compare" && (
-                <div className="space-y-6">
+                <div className="space-y-4">
                   {/* Arbitrage Summary Banner */}
                   {comparison && comparison.max_arbitrage_amount > 0 ? (
                     <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 flex items-start gap-3">
@@ -448,8 +451,8 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
                       </div>
                     </div>
                   ) : (
-                    <div className="p-4 rounded-2xl bg-muted/30 border border-border flex items-center gap-3 text-xs text-muted-foreground">
-                      <Store className="w-5 h-5 text-primary shrink-0" />
+                    <div className="p-3.5 rounded-2xl bg-muted/30 border border-border flex items-center gap-3 text-xs text-muted-foreground">
+                      <Store className="w-4 h-4 text-primary shrink-0" />
                       <span>
                         Este modelo fue identificado en {comparison?.total_stores || 1}{" "}
                         {comparison?.total_stores === 1 ? "tienda" : "tiendas"} con{" "}
@@ -458,7 +461,7 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
                     </div>
                   )}
 
-                  {/* Multi-Store Comparison Listings */}
+                  {/* Multi-Store Comparison Listings (Structured CSS Grid / Flex) */}
                   <div className="space-y-3">
                     <h5 className="text-xs font-mono font-bold uppercase tracking-wider text-muted-foreground">
                       Comparativa por Óptica en Chile ({comparison?.matches.length || 0})
@@ -473,69 +476,74 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
                         return (
                           <div
                             key={item.product_id || idx}
-                            className={`p-4 rounded-2xl border transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${
+                            className={`p-4 rounded-2xl border transition-all flex flex-col gap-3 ${
                               isCurrentBase
                                 ? "bg-primary/5 border-primary/30 ring-1 ring-primary/20"
                                 : "bg-card border-border/80 hover:border-foreground/20 shadow-xs"
                             }`}
                           >
-                            <div className="flex items-center gap-3 min-w-0 flex-1">
-                              <StoreBadge store={item.store} />
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <h6 className="font-semibold text-sm text-foreground truncate">
-                                    {item.model_name}
-                                  </h6>
-                                  {isCurrentBase && (
-                                    <span className="text-[10px] font-mono bg-primary/20 text-primary px-2 py-0.2 rounded-md font-bold shrink-0">
-                                      Estás viendo este
-                                    </span>
-                                  )}
-                                  {isCheapest && (
-                                    <span className="text-[10px] font-mono bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 px-2 py-0.2 rounded-md font-bold shrink-0 flex items-center gap-1">
-                                      ★ Mejor Precio
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground font-mono">
-                                  <span
-                                    className={
-                                      item.is_in_stock ? "text-emerald-600" : "text-rose-600"
-                                    }
-                                  >
-                                    {item.is_in_stock ? "● En Stock" : "○ Sin Stock"}
+                            {/* 1. Top Badges Strip */}
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <StoreBadge store={item.store} />
+                                {isCurrentBase && (
+                                  <span className="text-[10px] font-mono bg-primary/20 text-primary px-2 py-0.5 rounded-md font-bold shrink-0">
+                                    Estás viendo este
                                   </span>
-                                  {item.savings_vs_base > 0 && (
-                                    <span className="text-emerald-600 font-bold">
-                                      · Ahorras {formatCLP(item.savings_vs_base)}
-                                    </span>
-                                  )}
-                                </div>
+                                )}
+                                {isCheapest && (
+                                  <span className="text-[10px] font-mono bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded-md font-bold shrink-0 flex items-center gap-1">
+                                    ★ Mejor Precio
+                                  </span>
+                                )}
                               </div>
+                              <span
+                                className={`text-xs font-mono font-semibold ${
+                                  item.is_in_stock
+                                    ? "text-emerald-600 dark:text-emerald-400"
+                                    : "text-rose-600 dark:text-rose-400"
+                                }`}
+                              >
+                                {item.is_in_stock ? "● En Stock" : "○ Sin Stock"}
+                              </span>
                             </div>
 
-                            {/* Price and Action Button */}
-                            <div className="flex items-center justify-between sm:justify-end gap-4 w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-border/60">
-                              <div className="text-left sm:text-right font-mono">
-                                <p className="text-base font-black text-foreground">
-                                  {item.effective_price
-                                    ? formatCLP(item.effective_price)
-                                    : "A consultar"}
+                            {/* 2. Model Title & Differential Note */}
+                            <div className="space-y-1">
+                              <h6 className="font-semibold text-sm text-foreground leading-snug">
+                                {item.model_name}
+                              </h6>
+                              {item.savings_vs_base > 0 && (
+                                <p className="text-xs font-mono text-emerald-600 dark:text-emerald-400 font-bold">
+                                  Ahorras {formatCLP(item.savings_vs_base)} respecto a esta tienda
                                 </p>
-                                {item.price_discount &&
-                                  item.price_normal &&
-                                  item.price_discount < item.price_normal && (
-                                    <p className="text-xs line-through text-muted-foreground">
-                                      {formatCLP(item.price_normal)}
-                                    </p>
-                                  )}
+                              )}
+                            </div>
+
+                            {/* 3. Bottom Row: Price & External Action Button */}
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between pt-2 border-t border-border/50 gap-3">
+                              <div className="font-mono">
+                                <div className="flex items-baseline gap-2">
+                                  <span className="text-base sm:text-lg font-black text-foreground">
+                                    {item.effective_price
+                                      ? formatCLP(item.effective_price)
+                                      : "A consultar"}
+                                  </span>
+                                  {item.price_discount &&
+                                    item.price_normal &&
+                                    item.price_discount < item.price_normal && (
+                                      <span className="text-xs line-through text-muted-foreground">
+                                        {formatCLP(item.price_normal)}
+                                      </span>
+                                    )}
+                                </div>
                               </div>
 
                               <a
                                 href={item.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className={`inline-flex items-center gap-1.5 text-xs font-bold px-4 py-2 rounded-xl transition-all shadow-xs shrink-0 ${
+                                className={`inline-flex items-center justify-center gap-1.5 text-xs font-bold px-4 py-2 rounded-xl transition-all shadow-xs shrink-0 w-full sm:w-auto ${
                                   isCheapest
                                     ? "bg-emerald-600 text-white hover:bg-emerald-700"
                                     : "bg-primary text-primary-foreground hover:bg-primary/90"
