@@ -1,14 +1,11 @@
 import csv
-import difflib
 import io
-import json
 import logging
 import re
 from contextlib import asynccontextmanager
-from typing import List, Optional, Tuple
+from typing import List, Optional
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from sqlalchemy import or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -21,8 +18,6 @@ from src.models import (
     AdvisorChatRequest,
     AdvisorChatResponse,
     CatalogStatsRead,
-    JobStatusEnum,
-    PriceSnapshot,
     PriceSnapshotRead,
     Product,
     ProductComparisonResponse,
@@ -33,13 +28,25 @@ from src.models import (
     ScrapeTriggerResponse,
     SemanticSearchRequest,
     SemanticSearchResult,
-    StoreEnum,
     StorePriceMatch,
 )
 from src.scheduler import shutdown_scheduler, start_scheduler
 from src.scrapers.registry import execute_scrape_for_store, get_available_stores
 from src.security import get_admin_api_key, get_api_key, RateLimitMiddleware
+from src.services.advisor_nlu import (
+    BUDGET_CHEAP_KEYWORDS,
+    BUDGET_EXPENSIVE_KEYWORDS,
+    INTENT_SYNONYMS,
+    OPTICAL_STOP_WORDS,
+    detect_brand,
+    detect_category,
+    detect_store,
+    extract_budget_range,
+)
+from src.services.catalog import get_cached_catalog, map_product_read
 from src.services.ollama import ollama_service
+from src.services.product_matcher import extract_canonical_key
+from src.services.search import apply_deal_filter, expand_and_correct_query, lexical_score
 
 logging.basicConfig(
     level=settings.LOG_LEVEL,
@@ -90,10 +97,14 @@ app.add_middleware(RateLimitMiddleware)
 
 # 3. Add CORS Middleware
 cors_origins = settings.CORS_ORIGINS if isinstance(settings.CORS_ORIGINS, list) else [settings.CORS_ORIGINS]
+# Wildcard origins + credentials is a known CORS bypass: Starlette reflects
+# the request's Origin back verbatim whenever allow_credentials=True, which
+# effectively allows any origin to make authenticated cross-site requests.
+allow_wildcard = "*" in cors_origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_credentials=True,
+    allow_credentials=not allow_wildcard,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "X-API-Key", "Authorization"],
     expose_headers=["X-Total-Count"],
@@ -127,132 +138,11 @@ async def list_stores():
     }
 
 
-def _map_product_read(prod: Product) -> ProductRead:
-    latest = None
-    if prod.price_snapshots:
-        sorted_snaps = sorted(prod.price_snapshots, key=lambda s: s.scraped_at, reverse=True)
-        latest = sorted_snaps[0]
-
-    return ProductRead(
-        id=prod.id,
-        store=prod.store,
-        store_product_id=prod.store_product_id,
-        brand=prod.brand,
-        model_name=prod.model_name,
-        category=prod.category,
-        url=prod.url,
-        image_url=prod.image_url,
-        description=prod.description,
-        created_at=prod.created_at,
-        updated_at=prod.updated_at,
-        current_price_normal=latest.price_normal if latest else None,
-        current_price_discount=latest.price_discount if latest else None,
-        current_in_stock=latest.is_in_stock if latest else None,
-    )
-
-
-import time
-
-_CATALOG_CACHE = {
-    "products": [],
-    "stats": None,
-    "timestamp": 0.0,
-    "ttl_seconds": 180.0,  # 3 minutes cache
-}
-
-async def _get_cached_catalog(session: AsyncSession) -> tuple[List[ProductRead], CatalogStatsRead]:
-    now = time.time()
-    if _CATALOG_CACHE["products"] and (now - _CATALOG_CACHE["timestamp"]) < _CATALOG_CACHE["ttl_seconds"]:
-        return _CATALOG_CACHE["products"], _CATALOG_CACHE["stats"]
-
-    prod_res = await session.execute(select(Product).options(selectinload(Product.price_snapshots)))
-    products = prod_res.scalars().all()
-
-    mapped_list: List[ProductRead] = []
-    by_store = {}
-    by_category = {}
-    total_deals = 0
-    total_in_stock = 0
-    discount_sum = 0.0
-
-    for prod in products:
-        by_store[prod.store] = by_store.get(prod.store, 0) + 1
-        by_category[prod.category] = by_category.get(prod.category, 0) + 1
-
-        mapped = _map_product_read(prod)
-        mapped_list.append(mapped)
-
-        if mapped.current_in_stock is not False:
-            total_in_stock += 1
-        if (
-            mapped.current_price_discount
-            and mapped.current_price_normal
-            and mapped.current_price_discount < mapped.current_price_normal
-        ):
-            total_deals += 1
-            pct = ((mapped.current_price_normal - mapped.current_price_discount) / mapped.current_price_normal) * 100.0
-            discount_sum += pct
-
-    avg_discount = int(round(discount_sum / total_deals)) if total_deals > 0 else 0
-
-    stats = CatalogStatsRead(
-        total_products=len(mapped_list),
-        total_deals=total_deals,
-        avg_discount_percentage=avg_discount,
-        total_stores=len(by_store) if by_store else len(get_available_stores()),
-        total_in_stock=total_in_stock,
-        by_store=by_store,
-        by_category=by_category,
-    )
-
-    _CATALOG_CACHE["products"] = mapped_list
-    _CATALOG_CACHE["stats"] = stats
-    _CATALOG_CACHE["timestamp"] = now
-
-    return mapped_list, stats
-
-
 @app.get("/api/stats", response_model=CatalogStatsRead, tags=["Catalog"], dependencies=[Depends(get_api_key)])
 async def get_catalog_stats(session: AsyncSession = Depends(get_session)):
     """Return aggregated global metrics across the entire Chilean optics catalog with ultra-fast memory cache."""
-    _, stats = await _get_cached_catalog(session)
+    _, stats = await get_cached_catalog(session)
     return stats
-
-
-import difflib
-
-OPTICAL_BRAND_ALIASES = {
-    "oakely": "oakley", "aokley": "oakley", "okley": "oakley", "oakly": "oakley",
-    "rayban": "ray-ban", "ray ban": "ray-ban", "reiban": "ray-ban", "reban": "ray-ban",
-    "arnet": "arnette", "arnett": "arnette",
-    "voge": "vogue", "vog": "vogue",
-    "karun": "karün", "carun": "karün",
-    "polaroide": "polaroid",
-    "polarizdo": "polarizado", "polarizada": "polarizado", "polarizados": "polarizados",
-    "dorad": "dorado", "dorada": "dorado", "platead": "plateado", "plateada": "plateado",
-    "armazon": "armazón", "armazones": "armazón", "marcos": "marco",
-}
-
-def _expand_and_correct_query(query: str, all_brands: list[str]) -> tuple[str, list[str]]:
-    """Google-like query spelling correction and token expansion."""
-    raw_tokens = [t.strip().lower() for t in query.split() if t.strip()]
-    expanded = set(raw_tokens)
-    corrected_words = []
-
-    for t in raw_tokens:
-        corrected = t
-        if t in OPTICAL_BRAND_ALIASES:
-            corrected = OPTICAL_BRAND_ALIASES[t]
-            expanded.add(corrected)
-        elif all_brands:
-            matches = difflib.get_close_matches(t.capitalize(), all_brands, n=1, cutoff=0.75)
-            if matches:
-                corrected = matches[0].lower()
-                expanded.add(corrected)
-        corrected_words.append(corrected)
-
-    clean_corrected_query = " ".join(corrected_words)
-    return clean_corrected_query, list(expanded)
 
 
 @app.get("/api/products", response_model=List[ProductRead], tags=["Products"], dependencies=[Depends(get_api_key)])
@@ -271,7 +161,7 @@ async def get_products(
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_session),
 ):
-    all_products, _ = await _get_cached_catalog(session)
+    all_products, _ = await get_cached_catalog(session)
 
     filtered: List[tuple[float, ProductRead]] = []
     brand_lower = brand.lower() if brand else None
@@ -279,7 +169,7 @@ async def get_products(
     search_tokens = []
     if search and search.strip():
         known_brands = list({p.brand for p in all_products if p.brand})
-        _, search_tokens = _expand_and_correct_query(search.strip(), known_brands)
+        _, search_tokens = expand_and_correct_query(search.strip(), known_brands)
 
     for mapped in all_products:
         if store and store != "all" and mapped.store != store:
@@ -289,33 +179,9 @@ async def get_products(
         if brand_lower and (not mapped.brand or brand_lower not in mapped.brand.lower()):
             continue
 
-        score = 0.0
-        if search_tokens:
-            m_name = (mapped.model_name or "").lower()
-            m_brand = (mapped.brand or "").lower()
-            m_desc = (mapped.description or "").lower()
-            m_cat = (mapped.category or "").lower()
-
-            matched = False
-            for tok in search_tokens:
-                if tok == m_brand or tok in m_brand:
-                    matched = True
-                    score += 100.0
-                elif tok in m_name:
-                    matched = True
-                    score += 60.0
-                elif tok in m_cat:
-                    matched = True
-                    score += 30.0
-                elif tok in m_desc:
-                    matched = True
-                    score += 15.0
-                elif len(tok) >= 4 and difflib.SequenceMatcher(None, tok, m_brand).ratio() >= 0.75:
-                    matched = True
-                    score += 80.0
-
-            if not matched:
-                continue
+        score = lexical_score(search_tokens, mapped)
+        if search_tokens and score <= 0.0:
+            continue
 
         # Stock filter
         if in_stock is True and mapped.current_in_stock is False:
@@ -329,25 +195,8 @@ async def get_products(
         if max_price and price > max_price:
             continue
 
-        # Deal filters
-        if deal == "disc-40":
-            if not mapped.current_price_discount or not mapped.current_price_normal:
-                continue
-            pct = ((mapped.current_price_normal - mapped.current_price_discount) / mapped.current_price_normal) * 100.0
-            if pct < 40.0:
-                continue
-        elif deal == "disc-20":
-            if not mapped.current_price_discount or not mapped.current_price_normal:
-                continue
-            pct = ((mapped.current_price_normal - mapped.current_price_discount) / mapped.current_price_normal) * 100.0
-            if pct < 20.0:
-                continue
-        elif deal == "under-50k":
-            if price <= 0 or price > 50000:
-                continue
-        elif deal == "under-100k":
-            if price <= 0 or price > 100000:
-                continue
+        if not apply_deal_filter(deal, mapped, price):
+            continue
 
         filtered.append((score, mapped))
 
@@ -419,70 +268,14 @@ async def get_product_detail(
     )
 
 
-CANONICAL_MODEL_REGEX = re.compile(
-    r'\b(?:0?([a-zA-Z]{1,4})\s*[-_]?\s*(\d{3,5}[a-zA-Z]{0,3}))\b',
-    re.IGNORECASE,
-)
-
-EYEWEAR_STOPWORDS = {
-    "lentes", "lente", "anteojos", "anteojo", "gafas", "gafa", "armazon", "armazón", "armazones",
-    "marcos", "marco", "de", "sol", "opticos", "optico", "ópticos", "óptico", "contacto",
-    "caja", "pack", "unidades", "unidad", "uds", "con", "para", "hombre", "mujer", "unisex",
-    "polarizado", "polarizada", "polarizados", "clipon", "clip-on", "graduable", "lentesplus",
-    "gmo", "ryk", "schilling", "econopticas", "opv"
-}
-
-
-def _extract_canonical_key(prod: ProductRead | Product) -> tuple[str, str]:
-    brand = (prod.brand or "").strip().lower()
-    if "ray" in brand and "ban" in brand:
-        brand = "ray-ban"
-    elif "oakley" in brand:
-        brand = "oakley"
-    elif "karun" in brand or "karün" in brand:
-        brand = "karün"
-    elif "vogue" in brand:
-        brand = "vogue"
-    elif "arnette" in brand:
-        brand = "arnette"
-    elif "acuvue" in brand:
-        brand = "acuvue"
-    elif "alcon" in brand:
-        brand = "alcon"
-    elif "bausch" in brand or "lomb" in brand:
-        brand = "bausch-lomb"
-    elif "coopervision" in brand:
-        brand = "coopervision"
-
-    model_text = f"{prod.model_name or ''} {getattr(prod, 'store_product_id', '') or ''}".strip()
-    match = CANONICAL_MODEL_REGEX.search(model_text)
-    if match:
-        prefix = match.group(1).upper()
-        if prefix.startswith("0") and len(prefix) > 1:
-            prefix = prefix[1:]
-        code_num = match.group(2).upper()
-        clean_code = f"{prefix}{code_num}"
-        return f"{brand}:{clean_code.lower()}", clean_code
-
-    raw_tokens = re.findall(r'[a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]+', model_text.lower())
-    clean_tokens = [t for t in raw_tokens if t not in EYEWEAR_STOPWORDS and len(t) > 1]
-    if clean_tokens:
-        key_tokens = clean_tokens[:3]
-        clean_line = " ".join(key_tokens).title()
-        return f"{brand}:{'_'.join(key_tokens)}", clean_line
-
-    fallback = (getattr(prod, "store_product_id", "") or prod.id).lower()
-    return f"{brand}:{fallback}", prod.model_name or ""
-
-
 @app.get("/api/products/{product_id}/compare", response_model=ProductComparisonResponse, tags=["Products"], dependencies=[Depends(get_api_key)])
 async def compare_product_across_stores(
     product_id: str,
     session: AsyncSession = Depends(get_session),
 ):
     """Compare a given product across all Chilean optical chains using canonical model clustering."""
-    all_products, _ = await _get_cached_catalog(session)
-    
+    all_products, _ = await get_cached_catalog(session)
+
     # 1. Find base product
     base_prod = next((p for p in all_products if p.id == product_id), None)
     if not base_prod:
@@ -492,15 +285,15 @@ async def compare_product_across_stores(
         db_prod = res.scalar_one_or_none()
         if not db_prod:
             raise HTTPException(status_code=404, detail="Product not found")
-        base_prod = _map_product_read(db_prod)
+        base_prod = map_product_read(db_prod)
 
-    canonical_key, canonical_model = _extract_canonical_key(base_prod)
+    canonical_key, canonical_model = extract_canonical_key(base_prod)
     base_effective_price = base_prod.current_price_discount or base_prod.current_price_normal or 0
 
     # 2. Find all matches across the catalog
     matches_raw = []
     for p in all_products:
-        p_key, _ = _extract_canonical_key(p)
+        p_key, _ = extract_canonical_key(p)
         if p_key == canonical_key:
             matches_raw.append(p)
 
@@ -571,11 +364,11 @@ async def semantic_search(
     req: SemanticSearchRequest,
     session: AsyncSession = Depends(get_session),
 ):
-    all_products, _ = await _get_cached_catalog(session)
+    all_products, _ = await get_cached_catalog(session)
     known_brands = list({p.brand for p in all_products if p.brand})
 
     # 1. Google-like Typo correction and token expansion
-    corrected_query, search_tokens = _expand_and_correct_query(req.query.strip(), known_brands)
+    corrected_query, search_tokens = expand_and_correct_query(req.query.strip(), known_brands)
 
     query_vector = await ollama_service.get_embedding(corrected_query)
 
@@ -600,30 +393,11 @@ async def semantic_search(
         if req.brand and (not mapped.brand or req.brand.lower() not in mapped.brand.lower()):
             continue
 
-        # Lexical score
-        m_name = (mapped.model_name or "").lower()
-        m_brand = (mapped.brand or "").lower()
-        m_desc = (mapped.description or "").lower()
-        m_cat = (mapped.category or "").lower()
-
-        lexical_score = 0.0
-        for tok in search_tokens:
-            if tok == m_brand or tok in m_brand:
-                lexical_score += 100.0
-            elif tok in m_name:
-                lexical_score += 60.0
-            elif tok in m_cat:
-                lexical_score += 30.0
-            elif tok in m_desc:
-                lexical_score += 15.0
-            elif len(tok) >= 4 and difflib.SequenceMatcher(None, tok, m_brand).ratio() >= 0.75:
-                lexical_score += 80.0
-
         # Vector score
         v_dist = vector_results_dict.get(mapped.id)
         vector_score = max(0.0, (1.0 - v_dist) * 80.0) if v_dist is not None else 0.0
 
-        total_score = lexical_score + vector_score
+        total_score = lexical_score(search_tokens, mapped) + vector_score
         if total_score <= 0.0 and vector_results_dict and mapped.id not in vector_results_dict:
             continue
 
@@ -639,25 +413,8 @@ async def semantic_search(
         if req.max_price and price > req.max_price:
             continue
 
-        # Deal filters
-        if req.deal == "disc-40":
-            if not mapped.current_price_discount or not mapped.current_price_normal:
-                continue
-            pct = ((mapped.current_price_normal - mapped.current_price_discount) / mapped.current_price_normal) * 100.0
-            if pct < 40.0:
-                continue
-        elif req.deal == "disc-20":
-            if not mapped.current_price_discount or not mapped.current_price_normal:
-                continue
-            pct = ((mapped.current_price_normal - mapped.current_price_discount) / mapped.current_price_normal) * 100.0
-            if pct < 20.0:
-                continue
-        elif req.deal == "under-50k":
-            if price <= 0 or price > 50000:
-                continue
-        elif req.deal == "under-100k":
-            if price <= 0 or price > 100000:
-                continue
+        if not apply_deal_filter(req.deal, mapped, price):
+            continue
 
         scored_products.append((total_score, mapped))
 
@@ -683,248 +440,6 @@ async def semantic_search(
     return results
 
 
-OPTICAL_STOP_WORDS = {
-    "lentes", "anteojos", "gafas", "para", "busca", "buscar", "quiero",
-    "necesito", "precio", "chile", "como", "unos", "unas", "del", "las",
-    "los", "con", "sin", "que", "una", "uno", "por", "favor", "recomienda",
-    "recomiendame", "dame", "cual", "cuales", "mejores", "mejor", "buenos",
-    "bueno", "buenas", "buena", "hay", "tienen", "algo", "tipo", "estilo", "marca", "marcas",
-    "pero", "mas", "más", "menos", "de", "en", "el", "la", "los", "las",
-    "pa", "para", "piola", "weno", "buenisimo", "bakan", "bacanes", "onda", "unos",
-    "lucas", "lucas?", "luca", "mil", "pesos", "hasta", "máximo", "maximo", "menos", "presupuesto"
-}
-
-BUDGET_CHEAP_KEYWORDS = {
-    "barato", "baratos", "barata", "baratas", "barto", "bartos", "baratito", "baratitos",
-    "economico", "economicos", "economica", "economicas", "oferta", "ofertas", "descuento",
-    "descuentos", "rebaja", "rebajas", "liquidacion", "liquidaciones", "ganga", "gangas",
-    "accesible", "accesibles", "ahorro", "barat"
-}
-
-BUDGET_EXPENSIVE_KEYWORDS = {
-    "caro", "caros", "cara", "caras", "lujo", "premium", "alta gama", "top", "exclusivo", "exclusivos"
-}
-
-INTENT_CATEGORY_MAP = {
-    "trekking": "sol",
-    "senderismo": "sol",
-    "montaña": "sol",
-    "playa": "sol",
-    "deporte": "sol",
-    "deportivos": "sol",
-    "ciclismo": "sol",
-    "running": "sol",
-    "sol": "sol",
-    "polarizados": "sol",
-    "polarizado": "sol",
-    "aviador": "sol",
-    "aviator": "sol",
-    "armazon": "opticos",
-    "armazones": "opticos",
-    "marcos": "opticos",
-    "marco": "opticos",
-    "computador": "opticos",
-    "pantalla": "opticos",
-    "pantallas": "opticos",
-    "oficina": "opticos",
-    "pega": "opticos",
-    "trabajo": "opticos",
-    "laburo": "opticos",
-    "filtro azul": "opticos",
-    "blue defense": "opticos",
-    "receta": "opticos",
-    "lectura": "opticos",
-    "contacto": "contacto",
-    "acuvue": "contacto",
-    "biofinity": "contacto",
-    "astigmatismo": "contacto",
-    "miopia": "contacto",
-    "toricos": "contacto",
-    "diarios": "contacto",
-    "mensuales": "contacto",
-}
-
-INTENT_SYNONYMS = {
-    "trekking": ["outdoor", "polarizad", "karun", "oakley", "arnette", "deport", "sol"],
-    "senderismo": ["outdoor", "polarizad", "karun", "oakley", "sol"],
-    "montaña": ["outdoor", "polarizad", "karun", "oakley", "sol"],
-    "deporte": ["oakley", "arnette", "polarizad", "deport", "sol"],
-    "deportivos": ["oakley", "arnette", "polarizad", "deport", "sol"],
-    "ciclismo": ["oakley", "arnette", "polarizad", "sol"],
-    "running": ["oakley", "polarizad", "arnette", "sol"],
-    "computador": ["blue", "azul", "filtro", "optico"],
-    "pantalla": ["blue", "azul", "filtro", "optico"],
-    "pantallas": ["blue", "azul", "filtro", "optico"],
-    "pega": ["optico", "azul", "blue", "armazon"],
-    "trabajo": ["optico", "azul", "blue", "armazon"],
-    "polarizados": ["polarizad", "polarizado"],
-    "polarizado": ["polarizad", "polarizado"],
-    "contacto": ["contacto", "acuvue", "biofinity", "soflens", "dailies"],
-    "rayban": ["ray-ban", "ray ban", "aviator", "wayfarer"],
-    "oakley": ["oakley", "deport", "polarizad"],
-    "karun": ["karun", "sustentable", "polarizad"],
-    "ecologicos": ["karun", "sustentable"],
-    "ecologicas": ["karun", "sustentable"],
-    "sustentables": ["karun", "sustentable"],
-    "sustentable": ["karun", "sustentable"],
-    "redondos": ["round", "redondo", "circular"],
-    "cuadrados": ["square", "cuadrado", "rectangular"],
-    "negros": ["negro", "black"],
-    "dorados": ["dorado", "gold"],
-    "carey": ["havana", "carey", "tortoise"],
-    "havana": ["havana", "carey"],
-    "transparentes": ["transparente", "clear", "cristal"],
-}
-
-
-STORE_ALIASES = {
-    "gmo": "gmo",
-    "opticas gmo": "gmo",
-    "ópticas gmo": "gmo",
-    "place vendome": "place_vendome",
-    "place vendôme": "place_vendome",
-    "opv": "place_vendome",
-    "rotter": "ryk",
-    "rotter & krauss": "ryk",
-    "rotter y krauss": "ryk",
-    "ryk": "ryk",
-    "schilling": "schilling",
-    "opticas schilling": "schilling",
-    "ópticas schilling": "schilling",
-    "econopticas": "econopticas",
-    "econópticas": "econopticas",
-    "karun": "karun",
-    "karün": "karun",
-    "lentesplus": "lentesplus",
-}
-
-BRAND_ALIASES = {
-    "rayban": "Ray-Ban",
-    "ray-ban": "Ray-Ban",
-    "ray ban": "Ray-Ban",
-    "oakley": "Oakley",
-    "vogue": "Vogue",
-    "karun": "Karün",
-    "karün": "Karün",
-    "acuvue": "Acuvue",
-    "armani exchange": "Armani Exchange",
-    "armani": "Armani",
-    "michael kors": "Michael Kors",
-    "alcon": "Alcon",
-    "arnette": "Arnette",
-    "burberry": "Burberry",
-    "montini": "Montini",
-    "biofinity": "Biofinity",
-    "tecnol": "Tecnol",
-    "ralph": "Ralph",
-    "prada": "Prada",
-    "gucci": "Gucci",
-    "versace": "Versace",
-    "soflens": "SofLens",
-    "dailies": "Dailies",
-    "carrera": "Carrera",
-    "police": "Police",
-    "hugo boss": "Boss",
-    "boss": "Boss",
-}
-
-
-def _detect_store(text: str) -> Optional[str]:
-    t_lower = text.lower()
-    for alias, store_id in sorted(STORE_ALIASES.items(), key=lambda x: len(x[0]), reverse=True):
-        if re.search(rf"\b{re.escape(alias)}\b", t_lower):
-            return store_id
-    return None
-
-
-def _detect_brand(text: str) -> Optional[str]:
-    t_lower = text.lower()
-    # 1. Direct match
-    for alias, brand_name in sorted(BRAND_ALIASES.items(), key=lambda x: len(x[0]), reverse=True):
-        if alias in t_lower:
-            return brand_name
-    # 2. Fuzzy match word by word for common typos (e.g. 'rayan' -> 'Ray-Ban')
-    words = [w.strip(".,;:!?\"'()") for w in t_lower.split()]
-    for w in words:
-        if len(w) >= 4:
-            matches = difflib.get_close_matches(w, list(BRAND_ALIASES.keys()), n=1, cutoff=0.72)
-            if matches:
-                return BRAND_ALIASES[matches[0]]
-    return None
-
-
-def _parse_amount(raw: str) -> Optional[int]:
-    if not raw:
-        return None
-    raw_clean = raw.lower().replace("$", "").replace(".", "").replace(",", "").strip()
-    if "lucas" in raw_clean or "luca" in raw_clean or raw_clean.endswith("k"):
-        num_str = re.sub(r"[^\d]", "", raw_clean)
-        if num_str:
-            return int(num_str) * 1000
-    num_str = re.sub(r"[^\d]", "", raw_clean)
-    if not num_str:
-        return None
-    val = int(num_str)
-    if val < 500:
-        val *= 1000
-    return val
-
-
-def _extract_budget_range(text: str) -> Tuple[Optional[int], Optional[int]]:
-    """Extract (min_price, max_price) in CLP from natural Spanish queries."""
-    text_lower = text.lower()
-
-    # 1. Range: 'entre los X y los Y', 'entre X y Y', 'de X a Y', 'desde X hasta Y'
-    range_patterns = [
-        r"(?:entre|rango\s+de)\s+(?:los\s+|las\s+)?\$?([0-9.,k]+(?:\s*lucas?|\s*mil)?)\s+(?:y|e|a|-)\s+(?:los\s+|las\s+)?\$?([0-9.,k]+(?:\s*lucas?|\s*mil)?)",
-        r"(?:desde|de)\s+(?:los\s+|las\s+)?\$?([0-9.,k]+(?:\s*lucas?|\s*mil)?)\s+(?:hasta|a|-)\s+(?:los\s+|las\s+)?\$?([0-9.,k]+(?:\s*lucas?|\s*mil)?)",
-    ]
-    for pat in range_patterns:
-        m = re.search(pat, text_lower)
-        if m:
-            min_val = _parse_amount(m.group(1))
-            max_val = _parse_amount(m.group(2))
-            if min_val and max_val:
-                if min_val > max_val:
-                    min_val, max_val = max_val, min_val
-                return min_val, max_val
-
-    # 2. Minimum only: 'sobre X', 'mas de X', 'mayor a X', 'desde X'
-    min_pattern = r"(?:sobre|m[aá]s\s+de|mayor(?:es)?\s+a|desde|m[ií]nimo|m[ií]nima|a\s+partir\s+de)\s+(?:los\s+|las\s+)?\$?([0-9.,k]+(?:\s*lucas?|\s*mil)?)"
-    m_min = re.search(min_pattern, text_lower)
-    min_val = _parse_amount(m_min.group(1)) if m_min else None
-
-    # 3. Maximum only: 'menos de X', 'bajo los X', 'bajo X', 'hasta X', 'maximo X'
-    max_pattern = r"(?:menos\s+de|bajo\s+(?:los\s+|las\s+)?|menor(?:es)?\s+a|hasta\s+(?:los\s+|las\s+)?|m[aá]ximo\s+(?:de\s+)?|tope\s+(?:de\s+)?|presupuesto\s+(?:de\s+)?)\s*\$?([0-9.,k]+(?:\s*lucas?|\s*mil)?)"
-    m_max = re.search(max_pattern, text_lower)
-    max_val = _parse_amount(m_max.group(1)) if m_max else None
-
-    if min_val or max_val:
-        return min_val, max_val
-
-    # 4. Standalone lucas/k
-    m_lucas = re.search(r"(\d+)\s*(?:lucas?|k\b)", text_lower)
-    if m_lucas:
-        val = int(m_lucas.group(1)) * 1000
-        return None, val
-
-    return None, None
-
-
-def _detect_category(text: str) -> Optional[str]:
-    """Detect optical product category from multi-word phrases and domain keywords."""
-    t = text.lower()
-    # 1. Contact lenses
-    if any(k in t for k in ["contacto", "lentilla", "lentillas", "biofinity", "acuvue", "astigmatismo", "miopia", "toricos", "diarios", "mensuales", "soflens", "dailies"]):
-        return "contacto"
-    # 2. Sunglasses
-    if any(k in t for k in ["lentes de sol", "anteojos de sol", "gafas de sol", "gafas solares", "sol", "polarizado", "polarizados", "polarized", "aviador", "aviator", "trekking", "senderismo", "playa", "ciclismo", "running"]):
-        return "sol"
-    # 3. Optical frames
-    if any(k in t for k in ["lentes opticos", "lentes ópticos", "anteojos opticos", "anteojos ópticos", "armazon", "armazones", "marco", "marcos", "computador", "pantalla", "filtro azul", "blue defense", "receta", "lectura", "descanso", "pega", "trabajo", "laburo"]):
-        return "opticos"
-    return None
-
 
 @app.post("/api/advisor/chat", response_model=AdvisorChatResponse, tags=["AI & Vector Search"], dependencies=[Depends(get_api_key)])
 async def advisor_chat(
@@ -935,16 +450,16 @@ async def advisor_chat(
     raw_words = [w.strip(".,;:!?\"'()") for w in clean_msg.split()]
 
     # 1. Detect Budget Range (min & max in CLP)
-    budget_min, budget_max = _extract_budget_range(clean_msg)
+    budget_min, budget_max = extract_budget_range(clean_msg)
 
     # 2. Detect Store Intent from text or request
-    target_store = req.store or _detect_store(clean_msg)
+    target_store = req.store or detect_store(clean_msg)
 
     # 3. Detect Specific Brand (with typo / fuzzy tolerance)
-    detected_brand = _detect_brand(clean_msg)
+    detected_brand = detect_brand(clean_msg)
 
     # 4. Detect Category Intent (multi-word and keyword mapping)
-    inferred_category = req.category or _detect_category(clean_msg)
+    inferred_category = req.category or detect_category(clean_msg)
 
     # 5. Detect Stock Requirement
     stock_keywords = ["con stock", "en stock", "que haya stock", "disponible", "disponibles", "tengan stock"]
@@ -1034,7 +549,7 @@ async def advisor_chat(
         res_gf = await session.execute(global_fallback)
         products = res_gf.scalars().all()
 
-    mapped_products = [_map_product_read(p) for p in products]
+    mapped_products = [map_product_read(p) for p in products]
 
     # === STRICT DETERMINISTIC PIPELINE ===
 
@@ -1257,5 +772,5 @@ async def export_json(session: AsyncSession = Depends(get_session)):
     res = await session.execute(stmt)
     products = res.scalars().all()
 
-    data = [_map_product_read(p).model_dump() for p in products]
+    data = [map_product_read(p).model_dump() for p in products]
     return data
