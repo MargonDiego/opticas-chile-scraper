@@ -20,9 +20,10 @@ Esta guía detalla cómo desplegar el stack completo: **Astro + shadcn/ui Fronte
    - Verificá las **Environment Variables**:
      ```env
      ENVIRONMENT=production
-     API_KEY=dB57RDrRgEPNO6VK9AGUZoNwWANPBlrGgTOqk1D28OUqy5OhetekKsqfKDDAdoHoB7BowKMniCR4Guoiqxd2uNJyiKPyXKMS4AtgmC87FbzyJmPGeG7wJDFiRfwZp6Gj
+     API_KEY=<genera-una-key-con-secrets.token_urlsafe(48)>
+     ADMIN_API_KEY=<otra-key-distinta-nunca-expuesta-al-frontend>
      PUBLIC_API_URL=http://192.168.1.85:8008
-     PUBLIC_API_KEY=dB57RDrRgEPNO6VK9AGUZoNwWANPBlrGgTOqk1D28OUqy5OhetekKsqfKDDAdoHoB7BowKMniCR4Guoiqxd2uNJyiKPyXKMS4AtgmC87FbzyJmPGeG7wJDFiRfwZp6Gj
+     PUBLIC_API_KEY=<mismo-valor-que-API_KEY>
      APP_PORT=8008
      FRONTEND_PORT=3001
      ```
