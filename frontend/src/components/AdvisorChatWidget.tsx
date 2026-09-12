@@ -29,7 +29,7 @@ interface Message {
 
 const SEARCH_STAGES = [
   { text: "Analizando intención y rango de precio...", icon: BrainCircuit, color: "text-emerald-500" },
-  { text: "Consultando catálogo en vivo (9.980+ productos)...", icon: Database, color: "text-cyan-500" },
+  { text: "Consultando catálogo en vivo...", icon: Database, color: "text-cyan-500" },
   { text: "Comparando precios y descuentos entre ópticas...", icon: Scale, color: "text-amber-500" },
   { text: "Sintetizando la mejor recomendación...", icon: Sparkles, color: "text-indigo-500" },
 ];

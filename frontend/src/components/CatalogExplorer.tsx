@@ -87,6 +87,7 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [totalCount, setTotalCount] = useState<number>(0);
   const [catalogStats, setCatalogStats] = useState<CatalogStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
 
   const [search, setSearch] = useState("");
   const [semanticMode, setSemanticMode] = useState(false);
@@ -105,6 +106,7 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
 
   // 1. Fetch Global Stats
   const fetchStats = async () => {
+    setStatsLoading(true);
     try {
       const res = await fetch(`${apiBaseUrl}/api/stats`, {
         headers: { "X-API-Key": apiKey },
@@ -115,6 +117,8 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
       }
     } catch (err) {
       console.error("Error fetching catalog stats:", err);
+    } finally {
+      setStatsLoading(false);
     }
   };
 
@@ -271,11 +275,8 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
     }
   };
 
-  // Display metrics
-  const displayTotal = catalogStats?.total_products ?? 9980;
-  const displayDeals = catalogStats?.total_deals ?? 4323;
-  const displayDiscount = catalogStats?.avg_discount_percentage ?? 46;
-  const displayStores = catalogStats?.total_stores ?? 7;
+  // Display metrics: no fallback numbers while stats are loading, to avoid
+  // showing a stale/guessed count that then jumps once the real value arrives.
 
   const hasActiveCustomFilters =
     selectedStore !== "all" || selectedBrand !== null || dealFilter !== "all" || onlyInStock;
@@ -294,9 +295,13 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
       <div className="flex flex-wrap items-center justify-between gap-3 p-3 px-5 rounded-2xl bg-card/60 backdrop-blur-md border border-border/80 text-xs shadow-sm">
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="font-semibold text-foreground">
-            {displayTotal.toLocaleString("es-CL")}
-          </span>
+          {statsLoading ? (
+            <span className="inline-block h-3.5 w-12 rounded bg-muted/60 animate-pulse" />
+          ) : (
+            <span className="font-semibold text-foreground">
+              {(catalogStats?.total_products ?? 0).toLocaleString("es-CL")}
+            </span>
+          )}
           <span className="text-muted-foreground">productos en catálogo</span>
         </div>
 
@@ -304,9 +309,13 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
 
         <div className="flex items-center gap-2">
           <Tag className="w-3.5 h-3.5 text-emerald-400" />
-          <span className="font-semibold text-emerald-400">
-            {displayDeals.toLocaleString("es-CL")} ofertas activas
-          </span>
+          {statsLoading ? (
+            <span className="inline-block h-3.5 w-24 rounded bg-muted/60 animate-pulse" />
+          ) : (
+            <span className="font-semibold text-emerald-400">
+              {(catalogStats?.total_deals ?? 0).toLocaleString("es-CL")} ofertas activas
+            </span>
+          )}
         </div>
 
         <div className="hidden sm:block h-3.5 w-px bg-border/80" />
@@ -314,18 +323,26 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
         <div className="flex items-center gap-2">
           <Percent className="w-3.5 h-3.5 text-indigo-400" />
           <span className="text-muted-foreground">Ahorro promedio:</span>
-          <span className="font-mono font-bold text-foreground">
-            {displayDiscount > 0 ? `-${displayDiscount}%` : "-46%"}
-          </span>
+          {statsLoading ? (
+            <span className="inline-block h-3.5 w-10 rounded bg-muted/60 animate-pulse" />
+          ) : (
+            <span className="font-mono font-bold text-foreground">
+              -{catalogStats?.avg_discount_percentage ?? 0}%
+            </span>
+          )}
         </div>
 
         <div className="hidden sm:block h-3.5 w-px bg-border/80" />
 
         <div className="flex items-center gap-2">
           <Store className="w-3.5 h-3.5 text-muted-foreground" />
-          <span className="text-muted-foreground font-medium">
-            {displayStores} cadenas monitoreadas
-          </span>
+          {statsLoading ? (
+            <span className="inline-block h-3.5 w-28 rounded bg-muted/60 animate-pulse" />
+          ) : (
+            <span className="text-muted-foreground font-medium">
+              {catalogStats?.total_stores ?? 0} cadenas monitoreadas
+            </span>
+          )}
         </div>
       </div>
 
