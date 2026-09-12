@@ -57,15 +57,18 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        - PUBLIC_API_URL=${PUBLIC_API_URL:-https://api-lentes.ste-tellega.com}
+        - PUBLIC_API_KEY=${API_KEY:?API_KEY must be set (public/frontend key, no insecure default)}
     container_name: opticas_chile_frontend
     restart: unless-stopped
     depends_on:
       - opticas-api
     ports:
       - "${FRONTEND_PORT:-3002}:3001"
-    environment:
-      - PUBLIC_API_URL=${PUBLIC_API_URL:-https://api-lentes.ste-tellega.com}
-      - PUBLIC_API_KEY=${API_KEY:?API_KEY must be set (public/frontend key, no insecure default)}
+    # No `environment:` block here: Astro bakes PUBLIC_* vars into the static
+    # bundle at build time (see build.args above) - a runtime env var would
+    # have zero effect on the already-built dist/ this container serves.
 
 volumes:
   opticas_postgres_data:

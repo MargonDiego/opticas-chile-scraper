@@ -7,6 +7,15 @@ COPY package.json bun.lock* ./
 RUN bun install --frozen-lockfile || bun install
 
 COPY . .
+
+# Astro bakes PUBLIC_* vars into the static bundle at build time via Vite -
+# a runtime `environment:` entry in docker-compose is invisible to this
+# `RUN bun run build` step, so these must arrive as build args instead.
+ARG PUBLIC_API_URL
+ARG PUBLIC_API_KEY
+ENV PUBLIC_API_URL=$PUBLIC_API_URL
+ENV PUBLIC_API_KEY=$PUBLIC_API_KEY
+
 RUN bun run build
 
 # Production static server (unrestricted Host headers for Cloudflare / Coolify tunnels)
