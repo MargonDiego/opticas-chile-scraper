@@ -2,6 +2,7 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional
 from sqlalchemy.future import select
+from sqlalchemy.orm import noload
 from src.database import async_session_factory
 from src.models import JobStatusEnum, PriceSnapshot, Product, ScrapeJob, StoreEnum
 from src.scrapers.base import BaseOpticalScraper
@@ -53,7 +54,12 @@ async def execute_scrape_for_store(store: str, max_pages: Optional[int] = None) 
                 items_scraped += 1
                 prod_uid = f"{item.store}:{item.store_product_id}"
 
-                stmt = select(Product).where(Product.id == prod_uid)
+                # This upsert only reads/writes scalar Product columns, never
+                # .price_snapshots - but the relationship defaults to eager
+                # ("lazy=selectin"), so without noload() every one of the
+                # ~10k items in a scrape run would pull that product's full,
+                # ever-growing price history for nothing.
+                stmt = select(Product).where(Product.id == prod_uid).options(noload(Product.price_snapshots))
                 res = await session.execute(stmt)
                 existing_prod = res.scalar_one_or_none()
 
