@@ -150,15 +150,15 @@ export function AdvisorChatWidget({ apiBaseUrl, apiKey }: Props) {
       {/* Floating Concierge Trigger */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="fixed bottom-6 right-6 z-40 group flex items-center gap-2.5 px-4 py-2 rounded-full bg-card/95 hover:bg-card text-foreground border border-border/90 hover:border-emerald-500/60 shadow-xl shadow-black/40 hover:scale-[1.02] active:scale-95 transition-all duration-200 backdrop-blur-md"
+        className="fixed bottom-6 right-6 z-40 group flex items-center gap-2.5 px-4 py-2 rounded-full bg-card/95 hover:bg-card text-foreground border border-border/90 hover:border-primary/60 shadow-xl shadow-black/40 hover:scale-[1.02] active:scale-95 transition-all duration-200 backdrop-blur-md"
         aria-label="Abrir Asesor Óptico Inteligente"
       >
-        <div className="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 group-hover:scale-110 transition-transform">
+        <div className="flex items-center justify-center w-6 h-6 rounded-full bg-primary/10 text-primary border border-primary/20 group-hover:scale-110 transition-transform">
           <Sparkles className="w-3.5 h-3.5" />
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold tracking-tight text-foreground">Asesor IA</span>
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+          <span className="w-1.5 h-1.5 rounded-full bg-primary"></span>
         </div>
       </button>
 
@@ -362,7 +362,7 @@ export function AdvisorChatWidget({ apiBaseUrl, apiKey }: Props) {
               onChange={(e) => setInput(e.target.value)}
               placeholder="Ej: Ray-Ban aviator en oferta bajo $90k..."
               disabled={loading}
-              className="flex-1 bg-muted/50 border border-input rounded-xl px-3.5 py-2 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-50"
+              className="flex-1 bg-muted/50 border border-input rounded-xl px-3.5 py-2 text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
             />
             <button
               type="submit"

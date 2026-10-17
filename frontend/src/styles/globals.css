@@ -4,48 +4,48 @@
 
 @layer base {
   :root {
-    --background: 15 33% 98%;           /* #fcfaf9 Off-white warm */
-    --foreground: 0 0% 20%;             /* #333333 Charcoal */
-    --card: 0 0% 100%;                  /* Pure white card */
-    --card-foreground: 0 0% 20%;
+    --background: 210 20% 98%;          /* #f8fafc Soft pearl gallery grey */
+    --foreground: 222 47% 11%;          /* #0f172a Deep slate text */
+    --card: 0 0% 100%;                  /* #ffffff Pure white showcase cards */
+    --card-foreground: 222 47% 11%;
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 20%;
-    --primary: 167 76% 59%;             /* #48e5c2 Emerald / Mint Turquoise */
-    --primary-foreground: 0 0% 15%;     /* Dark text on bright primary */
-    --secondary: 15 20% 94%;
-    --secondary-foreground: 0 0% 20%;
-    --muted: 15 15% 92%;
-    --muted-foreground: 0 0% 45%;
-    --accent: 167 76% 94%;
-    --accent-foreground: 167 76% 25%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 221 83% 53%;             /* #2563eb Optical Cobalt Blue (5.4:1 contrast) */
+    --primary-foreground: 0 0% 100%;    /* #ffffff Crisp white on cobalt */
+    --secondary: 210 30% 95%;           /* #eef2f6 Subtle slate tint */
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 25% 94%;
+    --muted-foreground: 215 16% 47%;    /* #64748b Balanced reading slate */
+    --accent: 214 95% 93%;              /* #dbeafe Soft ice blue */
+    --accent-foreground: 221 83% 53%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 88%;
-    --input: 0 0% 88%;
-    --ring: 167 76% 59%;
+    --border: 214 32% 91%;              /* #e2e8f0 Crisp delicate borders */
+    --input: 214 32% 91%;
+    --ring: 221 83% 53%;
     --radius: 0.85rem;
   }
 
   .dark {
-    --background: 0 0% 14%;             /* #242424 Deep charcoal */
-    --foreground: 15 33% 98%;           /* #fcfaf9 */
-    --card: 0 0% 20%;                   /* #333333 Slate charcoal */
-    --card-foreground: 15 33% 98%;      /* #fcfaf9 */
-    --popover: 0 0% 20%;
-    --popover-foreground: 15 33% 98%;
-    --primary: 167 76% 59%;             /* #48e5c2 Vibrant Mint Turquoise */
-    --primary-foreground: 0 0% 12%;
-    --secondary: 0 0% 25%;
-    --secondary-foreground: 15 33% 98%;
-    --muted: 0 0% 25%;
-    --muted-foreground: 0 0% 70%;
-    --accent: 0 0% 27%;
-    --accent-foreground: 167 76% 59%;
+    --background: 222 47% 11%;          /* #0f172a Deep nocturnal studio */
+    --foreground: 210 40% 98%;          /* #f8fafc Clean ivory text */
+    --card: 217 33% 16%;                /* #1b2432 Slate card */
+    --card-foreground: 210 40% 98%;
+    --popover: 217 33% 16%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 217 91% 60%;             /* #3b82f6 Vivid sapphire blue */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 217 33% 22%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 33% 22%;
+    --muted-foreground: 215 20% 68%;
+    --accent: 217 33% 25%;
+    --accent-foreground: 217 91% 60%;
     --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 15 33% 98%;
-    --border: 0 0% 28%;
-    --input: 0 0% 28%;
-    --ring: 167 76% 59%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 215 28% 26%;              /* #2e3846 */
+    --input: 215 28% 26%;
+    --ring: 217 91% 60%;
   }
 }
 
