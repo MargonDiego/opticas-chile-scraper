@@ -105,8 +105,8 @@ export function ProductCard({ product, onViewHistory }: Props) {
         )}
       </div>
 
-      {/* 2. Optical Specimen Canvas (Light stage with inset ring) */}
-      <div className="relative aspect-[4/3] w-full p-4 flex items-center justify-center bg-zinc-100/70 dark:bg-zinc-900/60 ring-1 ring-inset ring-black/5 dark:ring-white/5 overflow-hidden">
+      {/* 2. Optical Specimen Canvas (Pure white showcase for seamless PNG transparency) */}
+      <div className="relative aspect-[4/3] w-full p-4 flex items-center justify-center bg-white border-b border-border/50 ring-1 ring-inset ring-black/5 overflow-hidden">
         {/* Category Pill in Corner */}
         <div className="absolute bottom-2.5 left-2.5 z-10 flex items-center gap-1 px-2 py-0.5 rounded bg-background/90 text-[10px] font-mono font-medium text-muted-foreground border border-border/60">
           <CategoryIcon className="w-3 h-3 text-muted-foreground" />
