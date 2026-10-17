@@ -6,15 +6,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import noload, selectinload
 
-from src.models import CatalogStatsRead, PriceSnapshot, Product, ProductRead
-from src.scrapers.registry import get_available_stores
+from src.models import CatalogStatsRead, PriceSnapshot, Product, ProductRead, StoreEnum
 
 _CATALOG_CACHE = {
     "products": [],
     "stats": None,
     "timestamp": 0.0,
-    "ttl_seconds": 180.0,  # 3 minutes cache
+    "ttl_seconds": 3600.0,  # 1 hour cache; invalidated explicitly after scrape runs
 }
+
+
+def invalidate_catalog_cache() -> None:
+    """Clear memory cache so subsequent requests load fresh catalog data."""
+    _CATALOG_CACHE["products"] = []
+    _CATALOG_CACHE["stats"] = None
+    _CATALOG_CACHE["timestamp"] = 0.0
 
 
 def map_product_read(prod: Product) -> ProductRead:
@@ -22,6 +28,10 @@ def map_product_read(prod: Product) -> ProductRead:
     if prod.price_snapshots:
         sorted_snaps = sorted(prod.price_snapshots, key=lambda s: s.scraped_at, reverse=True)
         latest = sorted_snaps[0]
+
+    # Sanitize unrealistic prices (< 1,000 CLP are placeholders, test items or anomalies)
+    price_normal = latest.price_normal if (latest and latest.price_normal and latest.price_normal >= 1000) else None
+    price_discount = latest.price_discount if (latest and latest.price_discount and latest.price_discount >= 1000) else None
 
     return ProductRead(
         id=prod.id,
@@ -35,8 +45,8 @@ def map_product_read(prod: Product) -> ProductRead:
         description=prod.description,
         created_at=prod.created_at,
         updated_at=prod.updated_at,
-        current_price_normal=latest.price_normal if latest else None,
-        current_price_discount=latest.price_discount if latest else None,
+        current_price_normal=price_normal,
+        current_price_discount=price_discount,
         current_in_stock=latest.is_in_stock if latest else None,
     )
 
@@ -89,6 +99,17 @@ async def get_cached_catalog(session: AsyncSession) -> tuple[List[ProductRead], 
         by_store[prod.store] = by_store.get(prod.store, 0) + 1
         by_category[prod.category] = by_category.get(prod.category, 0) + 1
 
+        norm_price = (
+            latest_price_normal
+            if (latest_price_normal and 1000 <= latest_price_normal <= 5000000)
+            else None
+        )
+        disc_price = (
+            latest_price_discount
+            if (latest_price_discount and 1000 <= latest_price_discount <= 5000000)
+            else None
+        )
+
         mapped = ProductRead(
             id=prod.id,
             store=prod.store,
@@ -101,8 +122,8 @@ async def get_cached_catalog(session: AsyncSession) -> tuple[List[ProductRead], 
             description=prod.description,
             created_at=prod.created_at,
             updated_at=prod.updated_at,
-            current_price_normal=latest_price_normal,
-            current_price_discount=latest_price_discount,
+            current_price_normal=norm_price,
+            current_price_discount=disc_price,
             current_in_stock=latest_is_in_stock,
         )
         mapped_list.append(mapped)
@@ -124,7 +145,7 @@ async def get_cached_catalog(session: AsyncSession) -> tuple[List[ProductRead], 
         total_products=len(mapped_list),
         total_deals=total_deals,
         avg_discount_percentage=avg_discount,
-        total_stores=len(by_store) if by_store else len(get_available_stores()),
+        total_stores=len(by_store) if by_store else len(StoreEnum),
         total_in_stock=total_in_stock,
         by_store=by_store,
         by_category=by_category,

@@ -70,14 +70,16 @@ export function AdvisorChatWidget({ apiBaseUrl, apiKey }: Props) {
 
   // Search stage progression timer (synced with ~7-8s real inference latency)
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let interval: ReturnType<typeof setInterval> | undefined;
     if (loading) {
       setSearchStageIndex(0);
       interval = setInterval(() => {
         setSearchStageIndex((prev) => (prev < SEARCH_STAGES.length - 1 ? prev + 1 : prev));
       }, 1900);
     }
-    return () => clearInterval(interval);
+    return () => {
+      if (interval) clearInterval(interval);
+    };
   }, [loading]);
 
   const handleSend = async (textToSend?: string) => {

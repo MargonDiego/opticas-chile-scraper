@@ -35,6 +35,18 @@ async def init_db() -> None:
 
         await conn.run_sync(SQLModel.metadata.create_all)
 
+        # Composite index on price_snapshots (product_id, scraped_at DESC) for sub-5ms catalog queries
+        try:
+            await conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_price_snapshots_product_scraped "
+                    "ON price_snapshots (product_id, scraped_at DESC);"
+                )
+            )
+            logger.info("Composite index ix_price_snapshots_product_scraped ensured.")
+        except Exception as e:
+            logger.warning(f"Could not create composite index: {e}")
+
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """Dependency for getting async database sessions."""

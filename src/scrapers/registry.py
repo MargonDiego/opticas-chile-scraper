@@ -13,6 +13,7 @@ from src.scrapers.place_vendome import PlaceVendomeScraper
 from src.scrapers.econopticas import EconopticasScraper
 from src.scrapers.karun import KarunScraper
 from src.scrapers.lentesplus import LentesplusScraper
+from src.services.catalog import invalidate_catalog_cache
 from src.services.ollama import ollama_service
 
 logger = logging.getLogger(__name__)
@@ -141,7 +142,8 @@ async def execute_scrape_for_store(store: str, max_pages: Optional[int] = None) 
             job.completed_at = datetime.utcnow()
             await session.commit()
             await session.refresh(job)
-            logger.info(f"Scrape completed for {store}: {items_scraped} scraped, {items_updated} updated.")
+            invalidate_catalog_cache()
+            logger.info(f"Scrape completed for {store}: {items_scraped} scraped, {items_updated} updated. Catalog cache invalidated.")
             return job
 
         except Exception as e:

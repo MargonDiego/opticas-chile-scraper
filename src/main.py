@@ -1,3 +1,4 @@
+import asyncio
 import csv
 import io
 import logging
@@ -13,7 +14,7 @@ from sqlalchemy.orm import selectinload
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.config import settings
-from src.database import get_session, init_db
+from src.database import async_session_factory, get_session, init_db
 from src.models import (
     AdvisorChatRequest,
     AdvisorChatResponse,
@@ -76,6 +77,17 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing Chilean Optics Scraper & AI API...")
     await init_db()
     start_scheduler()
+
+    # Pre-warm catalog cache asynchronously in background to avoid blocking startup
+    async def _warm_cache():
+        try:
+            async with async_session_factory() as session:
+                await get_cached_catalog(session)
+            logger.info("Catalog cache pre-warmed successfully.")
+        except Exception as e:
+            logger.warning(f"Cache pre-warming failed (non-critical): {e}")
+
+    asyncio.create_task(_warm_cache())
     yield
     logger.info("Shutting down Chilean Optics Scraper & AI API...")
     shutdown_scheduler()
@@ -288,7 +300,8 @@ async def compare_product_across_stores(
         base_prod = map_product_read(db_prod)
 
     canonical_key, canonical_model = extract_canonical_key(base_prod)
-    base_effective_price = base_prod.current_price_discount or base_prod.current_price_normal or 0
+    raw_base_price = base_prod.current_price_discount or base_prod.current_price_normal or 0
+    base_effective_price = raw_base_price if (1000 <= raw_base_price <= 5000000) else 0
 
     # 2. Find all matches across the catalog
     matches_raw = []
@@ -303,16 +316,22 @@ async def compare_product_across_stores(
     stores_present = set()
 
     for p in matches_raw:
-        eff_price = p.current_price_discount or p.current_price_normal
-        if eff_price and eff_price > 0:
+        raw_eff = p.current_price_discount or p.current_price_normal
+        eff_price = raw_eff if (raw_eff and 1000 <= raw_eff <= 5000000) else None
+        if eff_price:
             prices.append(eff_price)
         stores_present.add(p.store)
 
         disc_pct = None
-        if p.current_price_discount and p.current_price_normal and p.current_price_discount < p.current_price_normal:
+        if (
+            p.current_price_discount
+            and p.current_price_normal
+            and p.current_price_discount < p.current_price_normal
+            and p.current_price_discount >= 1000
+        ):
             disc_pct = round(((p.current_price_normal - p.current_price_discount) / p.current_price_normal) * 100, 1)
 
-        savings = (base_effective_price - eff_price) if (base_effective_price > 0 and eff_price and eff_price > 0) else 0
+        savings = (base_effective_price - eff_price) if (base_effective_price > 0 and eff_price) else 0
 
         matches.append(
             StorePriceMatch(

@@ -1,4 +1,4 @@
-﻿# Virtual Environment & Package Managers
+# Virtual Environment & Package Managers
 .venv/
 env/
 venv/
@@ -29,3 +29,6 @@ data/
 # Testing & Coverage
 .pytest_cache/
 .coverage
+
+# Tooling
+.atl/

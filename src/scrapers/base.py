@@ -42,9 +42,9 @@ def clean_clp_price(raw_price: str | int | float | None) -> Optional[int]:
                 return None
             val = int(cleaned)
 
-        # Sanity check: optical products in CLP are typically 1,000 - 3,000,000 CLP.
-        # Discard dummy/unrealistic values (like 98 billion CLP test prices)
-        if val > 5000000 or val <= 0:
+        # Sanity check: optical products in CLP are typically 1,000 - 5,000,000 CLP.
+        # Discard dummy/unrealistic values (like $1 test prices or 98 billion CLP typos)
+        if val < 1000 or val > 5000000:
             return None
         return val
     except Exception:

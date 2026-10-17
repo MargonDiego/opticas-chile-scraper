@@ -32,10 +32,10 @@ class OllamaService:
     def _get_candidate_urls(self) -> List[str]:
         if self._working_url:
             return [self._working_url]
-        candidates = ["http://192.168.1.85:11434", self.base_url, "http://host.docker.internal:11434", "http://127.0.0.1:11434"]
+        candidates = [self.base_url, "http://host.docker.internal:11434", "http://192.168.1.85:11434", "http://127.0.0.1:11434"]
         unique = []
         for c in candidates:
-            if c not in unique:
+            if c and c not in unique:
                 unique.append(c)
         return unique
 
