@@ -350,15 +350,17 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
       <div className="space-y-4">
         {/* Category Segmented Tabs */}
         <div className="flex justify-center">
-          <div className="inline-flex p-1.5 rounded-2xl bg-muted/40 border border-border/80 backdrop-blur-sm gap-1 max-w-full overflow-x-auto">
+          <div role="tablist" aria-label="Categorías de productos" className="inline-flex p-1.5 rounded-2xl bg-muted/40 border border-border/80 backdrop-blur-sm gap-1 max-w-full overflow-x-auto">
             {CATEGORIES.map((cat) => {
               const Icon = cat.icon;
               const isActive = selectedCategory === cat.id;
               return (
                 <button
                   key={cat.id}
+                  role="tab"
+                  aria-selected={isActive}
                   onClick={() => setSelectedCategory(cat.id)}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${
+                  className={`flex items-center gap-2 px-4 py-2 min-h-[44px] rounded-xl text-xs font-semibold transition-all whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                     isActive
                       ? "bg-background text-foreground shadow-sm scale-[1.02]"
                       : "text-muted-foreground hover:text-foreground hover:bg-background/40"
@@ -386,15 +388,16 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
                     ? "Búsqueda con IA: ej. 'armazón metálico dorado estilo aviador'..."
                     : "Buscar por modelo, marca o código (ej. Ray-Ban, Aviator, Oakley)..."
                 }
-                className="h-12 pl-11 pr-10 rounded-2xl text-sm bg-background/90 border-border/80 focus:border-primary focus:ring-1 focus:ring-primary"
+                className="h-12 pl-11 pr-12 rounded-2xl text-sm bg-background/90 border-border/80 focus:border-primary focus:ring-1 focus:ring-primary"
               />
               {search && (
                 <button
                   type="button"
                   onClick={() => setSearch("")}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 p-1 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/60"
+                  aria-label="Limpiar campo de búsqueda"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  <X className="w-3.5 h-3.5" />
+                  <X className="w-4 h-4" />
                 </button>
               )}
             </div>
@@ -404,6 +407,7 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
                 type="button"
                 variant={semanticMode ? "default" : "outline"}
                 onClick={() => setSemanticMode(!semanticMode)}
+                aria-pressed={semanticMode}
                 className={`h-12 rounded-2xl text-xs font-semibold gap-2 px-4 transition-all ${
                   semanticMode
                     ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
@@ -418,6 +422,8 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
               <Button
                 type="button"
                 variant="outline"
+                aria-expanded={showAdvancedFilters}
+                aria-label="Alternar panel de filtros avanzados"
                 onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
                 className={`h-12 rounded-2xl text-xs font-semibold gap-2 px-4 transition-all ${
                   showAdvancedFilters || hasActiveCustomFilters

@@ -57,3 +57,19 @@
     @apply bg-background text-foreground font-sans antialiased selection:bg-primary/20;
   }
 }
+
+/* Accessible intentional motion: disable continuous looping & vestibular triggers */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.05s !important;
+    scroll-behavior: auto !important;
+  }
+  .animate-spin,
+  .animate-pulse,
+  .animate-bounce {
+    animation: none !important;
+  }
+}

@@ -184,15 +184,20 @@ export function AdvisorChatWidget({ apiBaseUrl, apiKey }: Props) {
             </div>
             <div className="flex items-center gap-1">
               <button
+                type="button"
                 onClick={handleReset}
                 title="Reiniciar conversación"
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                aria-label="Reiniciar conversación del asistente"
+                className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <RotateCcw className="w-4 h-4" />
               </button>
               <button
+                type="button"
                 onClick={() => setIsOpen(false)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                title="Cerrar asesor óptico"
+                aria-label="Cerrar ventana del asesor óptico"
+                className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -292,8 +297,8 @@ export function AdvisorChatWidget({ apiBaseUrl, apiKey }: Props) {
                   <div className="flex-1 rounded-2xl rounded-bl-sm p-3 bg-muted/60 border border-border/80 space-y-2.5">
                     {/* Live Stage Progress Indicator */}
                     <div className="flex items-center gap-2 text-xs font-medium">
-                      <StageIcon className={`w-4 h-4 animate-bounce ${CurrentStage.color}`} />
-                      <span className="text-foreground font-medium animate-pulse">
+                      <StageIcon className={`w-4 h-4 animate-pulse ${CurrentStage.color}`} />
+                      <span className="text-foreground font-medium">
                         {CurrentStage.text}
                       </span>
                     </div>

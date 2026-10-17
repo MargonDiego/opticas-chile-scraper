@@ -174,10 +174,13 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
           </div>
 
           {/* Navigation Tabs */}
-          <div className="flex items-center bg-muted/70 p-1 rounded-xl border border-border/80 text-xs font-semibold shrink-0 self-start sm:self-auto">
+          <div role="tablist" aria-label="Secciones del análisis de precios" className="flex items-center bg-muted/70 p-1 rounded-xl border border-border/80 text-xs font-semibold shrink-0 self-start sm:self-auto">
             <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "history"}
               onClick={() => setActiveTab("history")}
-              className={`px-3 py-1.5 rounded-lg transition-all ${
+              className={`px-3 py-2 min-h-[40px] rounded-lg transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                 activeTab === "history"
                   ? "bg-background text-foreground shadow-xs"
                   : "text-muted-foreground hover:text-foreground"
@@ -186,8 +189,11 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
               Historial de Precios
             </button>
             <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "compare"}
               onClick={() => setActiveTab("compare")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all ${
+              className={`flex items-center gap-1.5 px-3 py-2 min-h-[40px] rounded-lg transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                 activeTab === "compare"
                   ? "bg-background text-foreground shadow-xs"
                   : "text-muted-foreground hover:text-foreground"
