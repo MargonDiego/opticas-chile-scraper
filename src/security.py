@@ -1,3 +1,4 @@
+import ipaddress
 import logging
 import secrets
 import time
@@ -86,16 +87,54 @@ class IPRateLimiter:
 
     def _get_client_ip(self, request: Request) -> str:
         # Only trust proxy-supplied headers when explicitly running behind a
-        # trusted reverse proxy (Coolify/Traefik/nginx). Otherwise these
-        # headers are attacker-controlled and let anyone spoof a new "IP" on
-        # every request to bypass the rate limit entirely.
+        # trusted reverse proxy chain (Cloudflare -> Traefik -> uvicorn).
+        # Header trust is NOT uniform behind such a chain:
+        # - CF-Connecting-IP is read first on the expectation that Cloudflare
+        #   overwrites it with the real visitor IP, which is what lets us treat
+        #   it as attacker-proof. That expectation is load-bearing and is
+        #   verified empirically after deploy (see below), not assumed silently.
+        # - X-Forwarded-For is APPENDED to by each proxy, so its leftmost entry
+        #   is whatever the original client sent and is therefore
+        #   attacker-controlled here: production was measured with 25 requests
+        #   carrying a unique X-Forwarded-For each and none were rate limited,
+        #   while identical or absent headers both hit the limit at request 21.
+        #   It stays only as a fallback for non-Cloudflare deployments where a
+        #   single trusted proxy overwrites the whole header.
+        # Every candidate is validated with the ipaddress module: garbage
+        # values must never become rate-limit bucket keys, since the history
+        # maps are keyed by this string. IPv6 zone identifiers are rejected
+        # separately because ipaddress accepts them with an arbitrarily long
+        # scope suffix, which would otherwise slip past this check.
+        #
+        # POST-DEPLOY CHECK (required): with TRUST_PROXY_HEADERS=true, rotating
+        # CF-Connecting-IP AND rotating X-Forwarded-For must BOTH return 429 at
+        # request 21. Rotating either without a 429 means Cloudflare preserves
+        # that header and this fix is not protecting anything.
         if settings.TRUST_PROXY_HEADERS:
+            candidates = [request.headers.get("CF-Connecting-IP")]
             forwarded = request.headers.get("X-Forwarded-For")
             if forwarded:
-                return forwarded.split(",")[0].strip()
+                candidates.append(forwarded.split(",")[0])
             real_ip = request.headers.get("X-Real-IP")
             if real_ip:
-                return real_ip.strip()
+                candidates.append(real_ip)
+            for candidate in candidates:
+                if candidate is None:
+                    continue
+                value = candidate.strip()
+                if not value:
+                    continue
+                # ipaddress accepts IPv6 zone identifiers with an arbitrarily
+                # long scope suffix, so this is the one validation it does not
+                # already do for us. No non-zone value it accepts exceeds the
+                # canonical maximum, which is why there is no length check here.
+                if "%" in value:
+                    continue
+                try:
+                    ipaddress.ip_address(value)
+                except ValueError:
+                    continue
+                return value
         if request.client:
             return request.client.host
         return "127.0.0.1"
