@@ -3,11 +3,13 @@ import csv
 import io
 import logging
 import re
+import time
 from contextlib import asynccontextmanager
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import or_
+from fastapi.responses import JSONResponse
+from sqlalchemy import or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -123,16 +125,125 @@ app.add_middleware(
 )
 
 
+DATABASE_HEALTH_TIMEOUT_SECONDS = 2.0
+OLLAMA_HEALTH_TIMEOUT_SECONDS = 1.5
+
+# /api/health is public and explicitly exempt from the rate limiter, so the
+# probe outcome is cached: without this, any caller could turn the endpoint
+# into a database + Ollama I/O amplifier.
+HEALTH_CACHE_TTL_SECONDS = 5.0
+
+_health_cache: Dict[str, Any] = {
+    "expires_at": 0.0,
+    "status_code": 200,
+    "payload": None,
+}
+_health_cache_lock: Optional[asyncio.Lock] = None
+_health_cache_lock_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def _reset_health_cache() -> None:
+    """Drop the cached health probe result. Used by test fixtures."""
+    global _health_cache_lock, _health_cache_lock_loop
+    _health_cache["expires_at"] = 0.0
+    _health_cache["status_code"] = 200
+    _health_cache["payload"] = None
+    _health_cache_lock = None
+    _health_cache_lock_loop = None
+
+
+def _get_health_cache_lock() -> asyncio.Lock:
+    """Return the probe lock, recreated when the running event loop changes.
+
+    ``asyncio.Lock`` instances are bound to the loop that first waits on them,
+    and the test suite runs every test on a fresh loop.
+    """
+    global _health_cache_lock, _health_cache_lock_loop
+    loop = asyncio.get_running_loop()
+    if _health_cache_lock is None or _health_cache_lock_loop is not loop:
+        _health_cache_lock = asyncio.Lock()
+        _health_cache_lock_loop = loop
+    return _health_cache_lock
+
+
+async def _probe_database(session: AsyncSession) -> None:
+    """Run the cheapest possible round-trip against the configured database."""
+    await session.execute(text("SELECT 1"))
+
+
+async def _probe_health(session: AsyncSession) -> Tuple[int, Dict[str, Any]]:
+    """Probe database then Ollama and return (status_code, body fields).
+
+    A dead database is fatal (503) because the catalog cannot be served.
+    A dead Ollama is only a degradation (200 + ``degraded``) because semantic
+    search falls back to lexical matching and the catalog still works.
+    """
+    try:
+        await asyncio.wait_for(_probe_database(session), timeout=DATABASE_HEALTH_TIMEOUT_SECONDS)
+    except Exception as exc:
+        # Only the error class is exposed: raw messages can leak DSNs/credentials.
+        logger.warning("Health check: database probe failed (%s)", type(exc).__name__)
+        return 503, {
+            "status": "unhealthy",
+            "database": "unreachable",
+            "database_error": type(exc).__name__,
+            "ollama": "unknown",
+        }
+
+    ollama_ok = False
+    try:
+        ollama_ok = await asyncio.wait_for(
+            ollama_service.ping(), timeout=OLLAMA_HEALTH_TIMEOUT_SECONDS
+        )
+    except Exception as exc:
+        logger.debug("Health check: ollama probe failed (%s)", type(exc).__name__)
+
+    return 200, {
+        "status": "healthy" if ollama_ok else "degraded",
+        "database": "ok",
+        "ollama": "ok" if ollama_ok else "unreachable",
+    }
+
+
 @app.get("/api/health", tags=["Health"])
-async def health_check():
-    """Public healthcheck for Coolify monitoring and container uptime."""
-    return {
-        "status": "healthy",
+async def health_check(session: AsyncSession = Depends(get_session)):
+    """Public healthcheck for Coolify monitoring and container uptime.
+
+    Probe results are cached for ``HEALTH_CACHE_TTL_SECONDS`` and concurrent
+    hits share a single probe, so rapid polling cannot multiply I/O.
+    """
+    base_payload = {
         "environment": settings.ENVIRONMENT,
         "security": "api_key_enabled" if settings.API_KEY else "open_access",
-        "database": "postgresql+pgvector" if settings.DATABASE_URL.startswith("postgresql") else "sqlite",
+        "database_engine": "postgresql+pgvector" if settings.DATABASE_URL.startswith("postgresql") else "sqlite",
         "available_stores": get_available_stores(),
     }
+
+    def _cached_response() -> Optional[JSONResponse]:
+        payload = _health_cache["payload"]
+        if payload is not None and time.monotonic() < _health_cache["expires_at"]:
+            return JSONResponse(
+                status_code=_health_cache["status_code"],
+                content={**base_payload, **payload},
+            )
+        return None
+
+    cached = _cached_response()
+    if cached is not None:
+        return cached
+
+    async with _get_health_cache_lock():
+        # A concurrent request may have filled the cache while we waited.
+        cached = _cached_response()
+        if cached is not None:
+            return cached
+
+        status_code, payload = await _probe_health(session)
+        _health_cache["status_code"] = status_code
+        _health_cache["payload"] = payload
+        _health_cache["expires_at"] = time.monotonic() + HEALTH_CACHE_TTL_SECONDS
+
+    return JSONResponse(status_code=status_code, content={**base_payload, **payload})
 
 
 @app.get("/api/stores", tags=["Stores"], dependencies=[Depends(get_api_key)])
@@ -378,6 +489,50 @@ async def compare_product_across_stores(
 
 
 
+def build_vector_search_stmt(
+    query_vector: List[float],
+    fetch_limit: int,
+    embedding_column=None,
+    store: Optional[str] = None,
+    category: Optional[str] = None,
+    brand: Optional[str] = None,
+):
+    """Build the pgvector candidate query ordered by ascending cosine distance.
+
+    Cosine distance is 0.0 for identical vectors and grows towards 2.0, so
+    ascending order puts the closest candidates first. Without the ORDER BY the
+    LIMIT would return arbitrary rows instead of the best matches.
+
+    Facet filters are pushed into SQL so a narrow facet (e.g. a single store)
+    cannot spend the whole candidate budget on rows the endpoint would discard
+    anyway. They mirror the Python filtering in ``semantic_search``:
+    store/category are exact matches and brand is a case-insensitive substring.
+    Price filters stay in Python because their values come from the latest
+    price snapshot, not from the indexed product row.
+
+    Rows without an embedding are excluded: ascending order places NULL
+    distances last, they get coerced to a distance of 1.0 downstream, and that
+    would bypass the relevance guard and surface embedding-less products as
+    semantic hits.
+
+    ``embedding_column`` exists so tests can compile this statement against a
+    pgvector-typed column (the model column is JSON when DATABASE_URL is not
+    PostgreSQL, and only pgvector columns expose ``cosine_distance``).
+    """
+    column = Product.embedding if embedding_column is None else embedding_column
+    distance = column.cosine_distance(query_vector)
+
+    stmt = select(Product.id, distance.label("distance")).where(Product.embedding.isnot(None))
+    if store and store != "all":
+        stmt = stmt.where(Product.store == store)
+    if category and category != "all":
+        stmt = stmt.where(Product.category == category)
+    if brand:
+        stmt = stmt.where(Product.brand.ilike(f"%{brand}%"))
+
+    return stmt.order_by(distance.asc()).limit(fetch_limit)
+
+
 @app.post("/api/products/search/semantic", response_model=List[SemanticSearchResult], tags=["AI & Vector Search"], dependencies=[Depends(get_api_key)])
 async def semantic_search(
     req: SemanticSearchRequest,
@@ -392,14 +547,37 @@ async def semantic_search(
     query_vector = await ollama_service.get_embedding(corrected_query)
 
     fetch_limit = max(req.limit * 3, 100)
-    vector_results_dict = {}
+    vector_results_dict: dict[str, float] = {}
 
     if query_vector and settings.DATABASE_URL.startswith("postgresql"):
-        stmt = select(Product.id, Product.embedding.cosine_distance(query_vector).label("distance")).options(selectinload(Product.price_snapshots)).limit(fetch_limit)
+        stmt = build_vector_search_stmt(
+            query_vector,
+            fetch_limit,
+            store=req.store,
+            category=req.category,
+            brand=req.brand,
+        )
         res = await session.execute(stmt)
         for row in res.all():
             p_id, dist = row[0], row[1]
             vector_results_dict[p_id] = float(dist) if dist is not None else 1.0
+
+        if not vector_results_dict:
+            logger.warning(
+                "Semantic search degraded to lexical-only: pgvector returned no candidates for query '%s'.",
+                corrected_query,
+            )
+    elif query_vector is None:
+        logger.warning(
+            "Semantic search degraded to lexical-only: embeddings unavailable for query '%s'.",
+            corrected_query,
+        )
+    else:
+        logger.warning(
+            "Semantic search degraded to lexical-only: vector search requires PostgreSQL with "
+            "pgvector, but the configured database is not PostgreSQL (query '%s').",
+            corrected_query,
+        )
 
     # 2. Score across the catalog
     scored_products: List[tuple[float, ProductRead]] = []
@@ -412,13 +590,17 @@ async def semantic_search(
         if req.brand and (not mapped.brand or req.brand.lower() not in mapped.brand.lower()):
             continue
 
-        # Vector score
+        # Hybrid score: the vector distance only applies to candidates the
+        # pgvector query actually returned; lexical tokens apply everywhere.
         v_dist = vector_results_dict.get(mapped.id)
         vector_score = max(0.0, (1.0 - v_dist) * 80.0) if v_dist is not None else 0.0
 
         total_score = lexical_score(search_tokens, mapped) + vector_score
-        if total_score <= 0.0 and vector_results_dict and mapped.id not in vector_results_dict:
-            continue
+        if vector_results_dict:
+            # Vector ranking is authoritative: rows outside the vector
+            # candidate set only survive on lexical evidence.
+            if total_score <= 0.0 and mapped.id not in vector_results_dict:
+                continue
 
         # Stock filter
         if req.in_stock is True and mapped.current_in_stock is False:

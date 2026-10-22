@@ -124,15 +124,23 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
 
   // 2. Fetch Catalog Products (Reset or Append)
   const fetchProducts = useCallback(
-    async (isAppend: boolean = false) => {
+    async (isAppend: boolean = false, force: boolean = false) => {
       const cacheKey = `${selectedStore}:${selectedCategory}:${selectedBrand || ""}:${dealFilter}:${onlyInStock}:${sortBy}:${semanticMode}:${search.trim()}`;
 
-      if (!isAppend && cacheRef.current.has(cacheKey)) {
+      // `force` (manual refresh) bypasses the cache read but still writes the
+      // fresh result back, so filter/search-driven fetches keep hitting it.
+      if (!isAppend && !force && cacheRef.current.has(cacheKey)) {
         const cached = cacheRef.current.get(cacheKey)!;
         setProducts(cached.products);
         setTotalCount(cached.totalCount);
         setLoading(false);
         return;
+      }
+
+      if (force) {
+        // Refresh must invalidate every filter combination: keeping the other
+        // keys would still serve stale data after a filter change.
+        cacheRef.current.clear();
       }
 
       if (isAppend) {
@@ -266,7 +274,8 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
 
   const handleRefresh = () => {
     fetchStats();
-    fetchProducts(false);
+    // Force a network fetch: the refresh button must never be a cache no-op.
+    fetchProducts(false, true);
   };
 
   const handleLoadMore = () => {

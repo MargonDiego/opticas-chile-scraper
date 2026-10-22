@@ -1,9 +1,16 @@
 import logging
+import time
 from typing import List, Optional
 import httpx
 from src.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Health probes walk every candidate host, so each attempt needs a short
+# timeout and the whole walk needs a hard budget: a dead Ollama must never
+# slow the healthcheck down.
+HEALTH_PROBE_PER_HOST_TIMEOUT_SECONDS = 0.5
+HEALTH_PROBE_TOTAL_TIMEOUT_SECONDS = 1.4
 
 
 def _clean_trailing_sentence(text: str) -> str:
@@ -38,6 +45,36 @@ class OllamaService:
             if c and c not in unique:
                 unique.append(c)
         return unique
+
+    async def ping(self) -> bool:
+        """Cheap reachability probe used by the health endpoint.
+
+        Walks the same candidate hosts as ``get_embedding``/``ask_advisor`` so a
+        cold start with an unreachable primary but a live fallback reports
+        healthy. Each host gets a short timeout and the whole walk is bounded,
+        because a dead Ollama must never slow the healthcheck down. The first
+        answering host is remembered in ``_working_url`` so later calls skip the
+        dead primary.
+        """
+        deadline = time.monotonic() + HEALTH_PROBE_TOTAL_TIMEOUT_SECONDS
+        async with httpx.AsyncClient() as client:
+            for base in self._get_candidate_urls():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                timeout = httpx.Timeout(
+                    min(HEALTH_PROBE_PER_HOST_TIMEOUT_SECONDS, remaining),
+                    connect=min(HEALTH_PROBE_PER_HOST_TIMEOUT_SECONDS, remaining),
+                )
+                try:
+                    res = await client.get(f"{base.rstrip('/')}/api/version", timeout=timeout)
+                    if res.status_code == 200:
+                        self._working_url = base
+                        return True
+                except Exception as e:
+                    logger.debug(f"Ollama health probe failed on {base}: {e}")
+                    continue
+        return False
 
     async def get_embedding(self, text: str) -> Optional[List[float]]:
         """Generate text vector embedding via Ollama."""

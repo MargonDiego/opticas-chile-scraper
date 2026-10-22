@@ -1,16 +1,24 @@
 import pytest
 from httpx import AsyncClient, ASGITransport
 from src.main import app
+from src.services.ollama import ollama_service
 
 
 @pytest.mark.asyncio
-async def test_health_endpoint():
+async def test_health_endpoint(monkeypatch):
+    async def _ping_ok() -> bool:
+        return True
+
+    monkeypatch.setattr(ollama_service, "ping", _ping_ok)
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         res = await client.get("/api/health")
         assert res.status_code == 200
         data = res.json()
         assert data["status"] == "healthy"
+        assert data["database"] == "ok"
+        assert data["ollama"] == "ok"
         assert "gmo" in data["available_stores"]
 
 
