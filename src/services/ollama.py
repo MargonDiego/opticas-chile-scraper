@@ -77,13 +77,20 @@ class OllamaService:
         return False
 
     async def get_embedding(self, text: str) -> Optional[List[float]]:
-        """Generate text vector embedding via Ollama."""
+        """Generate a text vector embedding via Ollama.
+
+        The caller owns the length policy: product text is composed (and
+        truncated at a word boundary) by ``src.services.embedding_text``, and
+        queries are short by construction. Truncating here as well used to cut
+        product context to 150 characters and make descriptive queries
+        unmatchable, so no blind cap is applied anymore.
+        """
         if not text or not text.strip():
             return None
 
         payload = {
             "model": self.embed_model,
-            "prompt": text.strip()[:150],
+            "prompt": text.strip(),
             "keep_alive": "30m",
         }
 

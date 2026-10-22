@@ -141,6 +141,32 @@ class SemanticSearchResult(ProductRead):
     similarity_score: Optional[float] = None
 
 
+class EmbeddingReindexResponse(SQLModel):
+    """Progress envelope for one batch of POST /api/admin/embeddings/reindex.
+
+    Paging is keyset-based: send the returned ``next_cursor`` back as
+    ``after_id`` and stop when ``done`` is true. ``next_cursor`` is the last
+    product id attempted, so it always advances even when some rows failed and
+    stayed NULL.
+
+    ``updated`` is the UPDATE rowcount (a row deleted between the read and the
+    write phase is not counted). ``remaining`` is a real ``COUNT(*)`` taken
+    after this batch was written -- rows still matching the filters in
+    ``only_missing`` mode, rows still ahead of the cursor in a full sweep --
+    and ``done`` is exactly ``remaining == 0``. ``processed == updated +
+    failed_no_text + failed_embedding`` holds except for rows deleted
+    mid-batch.
+    """
+
+    processed: int
+    updated: int
+    failed_no_text: int
+    failed_embedding: int
+    remaining: int
+    next_cursor: Optional[str] = None
+    done: bool
+
+
 class AdvisorChatRequest(SQLModel):
     message: str = Field(max_length=500)
     store: Optional[str] = None

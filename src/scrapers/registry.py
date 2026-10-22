@@ -14,6 +14,7 @@ from src.scrapers.econopticas import EconopticasScraper
 from src.scrapers.karun import KarunScraper
 from src.scrapers.lentesplus import LentesplusScraper
 from src.services.catalog import invalidate_catalog_cache
+from src.services.embedding_text import build_embedding_text
 from src.services.ollama import ollama_service
 
 logger = logging.getLogger(__name__)
@@ -64,14 +65,39 @@ async def execute_scrape_for_store(store: str, max_pages: Optional[int] = None) 
                 res = await session.execute(stmt)
                 existing_prod = res.scalar_one_or_none()
 
-                import re
-                clean_desc = re.sub(r"<[^>]+>", " ", item.description or "")[:200]
-                embed_text = f"{item.brand} {item.model_name} {item.category} {clean_desc}".strip()
+                # The text embedded here MUST equal the text the re-index builds
+                # from the persisted row, because both sides feed the same
+                # pgvector column. Two rules keep them identical:
+                #
+                # 1. Description: an empty incoming description keeps the stored
+                #    value instead of erasing catalog copy. So the text below is
+                #    composed from the value that will actually be persisted
+                #    (``item.description or existing_prod.description``), not
+                #    from the raw scraped field.
+                # 2. Store: the update does not touch ``store``, so its persisted
+                #    value comes from the row (create uses the incoming id).
+                # Brand / model name / category are always overwritten with the
+                # incoming item, so composing from those is already consistent.
+                effective_description = item.description or (
+                    existing_prod.description if existing_prod else None
+                )
+                effective_store = existing_prod.store if existing_prod else item.store
+
+                embed_text = build_embedding_text(
+                    brand=item.brand,
+                    model_name=item.model_name,
+                    category=item.category,
+                    store=effective_store,
+                    description=effective_description,
+                )
                 embedding = None
-                try:
-                    embedding = await ollama_service.get_embedding(embed_text)
-                except Exception as emb_err:
-                    logger.warning(f"Embedding generation failed for {prod_uid}: {emb_err}")
+                if not embed_text:
+                    logger.warning(f"Skipping embedding for {prod_uid}: empty embedding text.")
+                else:
+                    try:
+                        embedding = await ollama_service.get_embedding(embed_text)
+                    except Exception as emb_err:
+                        logger.warning(f"Embedding generation failed for {prod_uid}: {emb_err}")
 
                 if existing_prod:
                     existing_prod.brand = item.brand
@@ -79,6 +105,10 @@ async def execute_scrape_for_store(store: str, max_pages: Optional[int] = None) 
                     existing_prod.category = item.category
                     existing_prod.url = item.url
                     existing_prod.image_url = item.image_url or existing_prod.image_url
+                    # Regression: description used to be left untouched while the
+                    # embedding was rebuilt from the scraped text, so a re-index
+                    # (which reads this column) rebuilt a different string.
+                    existing_prod.description = effective_description
                     if embedding:
                         existing_prod.embedding = embedding
                     existing_prod.updated_at = now
@@ -94,7 +124,7 @@ async def execute_scrape_for_store(store: str, max_pages: Optional[int] = None) 
                         category=item.category,
                         url=item.url,
                         image_url=item.image_url,
-                        description=item.description,
+                        description=effective_description,
                         embedding=embedding,
                         created_at=now,
                         updated_at=now,

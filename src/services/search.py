@@ -1,4 +1,5 @@
 import difflib
+from typing import Optional
 
 from src.models import ProductRead
 
@@ -66,6 +67,27 @@ def lexical_score(search_tokens: list[str], mapped: ProductRead) -> float:
             score += 80.0
 
     return score
+
+
+def cosine_distance_to_similarity(distance: Optional[float]) -> Optional[float]:
+    """Map a pgvector cosine distance to a cosine similarity in [0.0, 1.0].
+
+    pgvector's ``<=>`` operator returns the cosine distance (1 - cosine
+    similarity), so similarity = 1 - distance. Floating point drift can push
+    the value slightly outside the valid range, hence the clamp. Rounding to 4
+    decimals keeps the API payload readable without hiding real differences.
+
+    ``None`` (a row that did not come from the vector candidate set) maps to
+    ``None`` as well: callers must not invent a score for lexical-only hits.
+    """
+    if distance is None:
+        return None
+
+    similarity = 1.0 - float(distance)
+    if similarity != similarity:  # NaN guard: a broken vector is not a score.
+        return None
+
+    return round(min(1.0, max(0.0, similarity)), 4)
 
 
 def apply_deal_filter(deal: str | None, mapped: ProductRead, price: float) -> bool:

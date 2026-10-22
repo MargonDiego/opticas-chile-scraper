@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy import or_, text
+from sqlalchemy import JSON, func, or_, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -21,6 +21,7 @@ from src.models import (
     AdvisorChatRequest,
     AdvisorChatResponse,
     CatalogStatsRead,
+    EmbeddingReindexResponse,
     PriceSnapshotRead,
     Product,
     ProductComparisonResponse,
@@ -47,9 +48,15 @@ from src.services.advisor_nlu import (
     extract_budget_range,
 )
 from src.services.catalog import get_cached_catalog, map_product_read
+from src.services.embedding_text import build_embedding_text
 from src.services.ollama import ollama_service
 from src.services.product_matcher import extract_canonical_key
-from src.services.search import apply_deal_filter, expand_and_correct_query, lexical_score
+from src.services.search import (
+    apply_deal_filter,
+    cosine_distance_to_similarity,
+    expand_and_correct_query,
+    lexical_score,
+)
 
 logging.basicConfig(
     level=settings.LOG_LEVEL,
@@ -511,9 +518,8 @@ def build_vector_search_stmt(
     price snapshot, not from the indexed product row.
 
     Rows without an embedding are excluded: ascending order places NULL
-    distances last, they get coerced to a distance of 1.0 downstream, and that
-    would bypass the relevance guard and surface embedding-less products as
-    semantic hits.
+    distances last, and the read loop skips a NULL distance instead of scoring
+    it, so an embedding-less product can never surface as a semantic hit.
 
     ``embedding_column`` exists so tests can compile this statement against a
     pgvector-typed column (the model column is JSON when DATABASE_URL is not
@@ -560,7 +566,13 @@ async def semantic_search(
         res = await session.execute(stmt)
         for row in res.all():
             p_id, dist = row[0], row[1]
-            vector_results_dict[p_id] = float(dist) if dist is not None else 1.0
+            # A NULL distance is not "distance 1.0": there is no measurement to
+            # score. Skipping the id keeps the row lexical-only, so it serializes
+            # ``similarity_score = null`` (the documented rule) instead of a
+            # fabricated 0.0.
+            if dist is None:
+                continue
+            vector_results_dict[p_id] = float(dist)
 
         if not vector_results_dict:
             logger.warning(
@@ -637,7 +649,16 @@ async def semantic_search(
 
     results = []
     for _, mapped in scored_products[:req.limit]:
-        results.append(SemanticSearchResult(**mapped.model_dump()))
+        result = SemanticSearchResult(**mapped.model_dump())
+        # pgvector's ``<=>`` operator returns cosine distance, so the honest
+        # score is ``similarity = 1 - distance`` clamped to [0.0, 1.0] and
+        # rounded to 4 decimals. Only rows that came back from the vector
+        # candidate set have a measurable distance; lexical-only fallback rows
+        # keep ``similarity_score = None`` instead of inventing a number.
+        distance = vector_results_dict.get(mapped.id)
+        if distance is not None:
+            result.similarity_score = cosine_distance_to_similarity(distance)
+        results.append(result)
     return results
 
 
@@ -975,3 +996,326 @@ async def export_json(session: AsyncSession = Depends(get_session)):
 
     data = [map_product_read(p).model_dump() for p in products]
     return data
+
+
+# --- Admin embedding re-index -------------------------------------------------
+#
+# Rebuilding embeddings is an opt-in maintenance task. Two guards matter:
+#
+# * It must not pin a pooled database connection while Ollama works. The batch
+#   is read through a short-lived session, embedded with no session checked
+#   out, and persisted through a second short-lived session.
+# * Two operators paging the endpoint at once would double the work, so a
+#   module-level lock rejects a concurrent run with 409.
+#
+# The lock is recreated when the event loop changes, for the same reason as the
+# health probe lock: ``asyncio.Lock`` binds to the loop that first waits on it
+# and the test suite runs every test on a fresh loop.
+_reindex_lock: Optional[asyncio.Lock] = None
+_reindex_lock_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def _get_reindex_lock() -> asyncio.Lock:
+    """Return the re-index lock for the running event loop."""
+    global _reindex_lock, _reindex_lock_loop
+    loop = asyncio.get_running_loop()
+    if _reindex_lock is None or _reindex_lock_loop is not loop:
+        _reindex_lock = asyncio.Lock()
+        _reindex_lock_loop = loop
+    return _reindex_lock
+
+
+def _missing_embedding_clause():
+    """Match products whose embedding has not been computed yet.
+
+    PostgreSQL stores a real SQL NULL in the pgvector column, so ``IS NULL`` is
+    enough. The SQLite fallback stores the column as JSON, where SQLAlchemy
+    serializes a Python ``None`` as the JSON literal ``null`` instead of SQL
+    NULL; without the extra comparison a local ``only_missing`` run would match
+    nothing at all.
+    """
+    column = Product.__table__.c.embedding
+    if isinstance(column.type, JSON):
+        return or_(column.is_(None), column == JSON.NULL)
+    return column.is_(None)
+
+
+def _reindex_filters(*, only_missing: bool = False, store: Optional[str] = None) -> List[Any]:
+    """Filters shared by the batch read and the ``remaining`` count.
+
+    Both statements MUST use this helper: if they ever diverge, ``done`` starts
+    describing a different set than the one that was actually processed.
+    """
+    filters: List[Any] = []
+    if store:
+        filters.append(Product.store == store)
+    if only_missing:
+        filters.append(_missing_embedding_clause())
+    return filters
+
+
+def build_reindex_batch_stmt(
+    *,
+    limit: int,
+    after_id: Optional[str] = None,
+    only_missing: bool = False,
+    store: Optional[str] = None,
+):
+    """One keyset page of products to re-index.
+
+    ``id > :after_id ORDER BY id LIMIT :limit`` replaces OFFSET paging: it is
+    deterministic under concurrent inserts/deletes and it can never re-read the
+    same page when processed rows leave the filtered set (``only_missing``). The
+    cursor is exclusive, so the row it points at is never processed twice.
+
+    The primary key is a string (``gmo:123``), so the comparison is a text range
+    scan over the primary-key index rather than a numeric one.
+    """
+    stmt = select(
+        Product.id,
+        Product.brand,
+        Product.model_name,
+        Product.category,
+        Product.store,
+        Product.description,
+    )
+    for clause in _reindex_filters(only_missing=only_missing, store=store):
+        stmt = stmt.where(clause)
+    if after_id:
+        stmt = stmt.where(Product.id > after_id)
+    return stmt.order_by(Product.id).limit(limit)
+
+
+def build_reindex_remaining_stmt(
+    *,
+    only_missing: bool = False,
+    store: Optional[str] = None,
+    after_id: Optional[str] = None,
+):
+    """``COUNT(*)`` of the rows that still need work after this batch.
+
+    Both modes count "work left", which is what makes ``done = remaining == 0``
+    meaningful:
+
+    * ``only_missing``: the filters already describe the outstanding work
+      (``embedding IS NULL``), so the count is cursor-independent. A row that
+      keeps failing stays counted, so ``done`` can never claim success while the
+      catalog still has NULL embeddings.
+    * full re-index: nothing in the row changes, so the outstanding work is the
+      part of the scan that has not been paged yet. The caller therefore passes
+      the cursor here; without that bound ``remaining`` would be the catalog
+      size and ``done`` could never become true.
+    """
+    stmt = select(func.count()).select_from(Product)
+    for clause in _reindex_filters(only_missing=only_missing, store=store):
+        stmt = stmt.where(clause)
+    if after_id:
+        stmt = stmt.where(Product.id > after_id)
+    return stmt
+
+
+@app.post(
+    "/api/admin/embeddings/reindex",
+    response_model=EmbeddingReindexResponse,
+    tags=["Admin"],
+    dependencies=[Depends(get_admin_api_key)],
+)
+async def reindex_embeddings(
+    limit: int = Query(100, ge=1, le=500, description="Products per batch"),
+    after_id: Optional[str] = Query(
+        None,
+        max_length=200,
+        description=(
+            "Exclusive keyset cursor: the next_cursor of the previous batch. "
+            "Omit it for the first batch."
+        ),
+    ),
+    only_missing: bool = Query(
+        False, description="Process only products whose embedding is NULL"
+    ),
+    store: Optional[str] = Query(None, max_length=50, description="Restrict to one store"),
+):
+    """Rebuild product embeddings after the embedding text composition changes.
+
+    Keyset paging contract:
+
+    * First call sends no ``after_id``; every later call sends the previous
+      ``next_cursor``. ``next_cursor`` is the last id *attempted* in the batch,
+      so it always advances, even when some rows failed and stayed NULL.
+    * Stop when ``done`` is true, or when a batch returns ``processed == 0``
+      while ``remaining`` is still non-zero (the leftovers keep failing; they
+      are logged row by row). Never re-send the same cursor in a loop.
+    * ``remaining`` is a real ``COUNT(*)`` measured after this batch was
+      written, and ``done`` is exactly ``remaining == 0``. With
+      ``only_missing`` it counts rows still matching the filters (NULL
+      embeddings) anywhere, so a row that keeps failing keeps ``done`` false.
+      In a full sweep it counts the scan ahead of the cursor, so ``done``
+      becomes true once the last page has been processed.
+    * ``updated`` is the UPDATE rowcount, so a row deleted between the read and
+      the write phase is not counted as updated.
+    * A batch where every row that had text produced no vector at all is an
+      outage, not a partial success: it returns 503 so the operator stops and
+      fixes the embedding service instead of burning through the catalog.
+    """
+    lock = _get_reindex_lock()
+    if lock.locked():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "An embedding re-index is already running. "
+                "Wait for the current batch to finish before starting another one."
+            ),
+        )
+
+    # There is no suspension point between ``locked()`` and this acquire on a
+    # single event loop, so the check-then-acquire is atomic. try/finally (not
+    # ``async with``) keeps the release explicit on every exit path, including
+    # HTTPException, cancellation and unexpected errors.
+    await lock.acquire()
+    try:
+        # Phase 1: read the batch, then release the connection.
+        async with async_session_factory() as session:
+            rows = (
+                await session.execute(
+                    build_reindex_batch_stmt(
+                        limit=limit,
+                        after_id=after_id,
+                        only_missing=only_missing,
+                        store=store,
+                    )
+                )
+            ).all()
+
+        # Phase 2: embed with no database session checked out.
+        vectors: List[Tuple[str, List[float]]] = []
+        attempted_ids: List[str] = []
+        failed_no_text = 0
+        failed_embedding = 0
+        for product_id, brand, model_name, category, prod_store, description in rows:
+            attempted_ids.append(product_id)
+            text = build_embedding_text(
+                brand=brand,
+                model_name=model_name,
+                category=category,
+                store=prod_store,
+                description=description,
+            )
+            if not text:
+                logger.warning(
+                    "Skipping re-index for product %s: empty embedding text.", product_id
+                )
+                failed_no_text += 1
+                continue
+
+            vector = await ollama_service.get_embedding(text)
+            if not vector:
+                logger.warning("Re-index could not embed product %s.", product_id)
+                failed_embedding += 1
+                continue
+
+            vectors.append((product_id, vector))
+
+        rows_with_text = len(rows) - failed_no_text
+        if rows_with_text and failed_embedding == rows_with_text:
+            # Ollama answered nothing for every embeddable row: this is an
+            # unreachable embedding service, not a partial success. Failing
+            # loudly keeps the operator from sweeping the catalog to NULL.
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Embedding service unavailable: none of the "
+                    f"{rows_with_text} embeddable products in this batch produced a vector. "
+                    "No embeddings were written. Check Ollama (OLLAMA_BASE_URL) and retry "
+                    f"the same cursor (after_id={after_id!r}, only_missing={only_missing}, "
+                    f"store={store!r})."
+                ),
+            )
+
+        # Phase 3: persist through a second short-lived session.
+        updated = 0
+        if vectors:
+            try:
+                async with async_session_factory() as session:
+                    for product_id, vector in vectors:
+                        result = await session.execute(
+                            update(Product)
+                            .where(Product.id == product_id)
+                            .values(embedding=vector)
+                        )
+                        # The rowcount, not len(vectors): a row deleted between
+                        # the read and the write phase matches nothing and must
+                        # not be reported as updated.
+                        updated += result.rowcount or 0
+                    await session.commit()
+            except Exception:
+                logger.error(
+                    "Re-index failed while persisting vectors (after_id=%s).",
+                    after_id,
+                    exc_info=True,
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        "Could not persist the embeddings of this batch; nothing was "
+                        "committed. Retry the same cursor."
+                    ),
+                ) from None
+
+        processed = len(rows)
+        next_cursor = attempted_ids[-1] if attempted_ids else after_id
+
+        # ``remaining`` is measured after the write, so it reflects the rows this
+        # batch just fixed instead of the state the batch started from.
+        # In only_missing mode the filters already express the outstanding work,
+        # so the cursor must NOT shrink the count (a persistently failing row
+        # must keep ``done`` false). In a full sweep the outstanding work is the
+        # scan ahead of the cursor.
+        async with async_session_factory() as session:
+            remaining = int(
+                (
+                    await session.execute(
+                        build_reindex_remaining_stmt(
+                            only_missing=only_missing,
+                            store=store,
+                            after_id=None if only_missing else next_cursor,
+                        )
+                    )
+                ).scalar_one()
+            )
+
+        done = remaining == 0
+
+        if processed == 0 and not done:
+            logger.warning(
+                "Embedding re-index reached the end of the scan with %s rows still "
+                "unembedded; they keep failing (see the per-row warnings above).",
+                remaining,
+            )
+
+        logger.info(
+            "Embedding re-index batch: after_id=%s limit=%s only_missing=%s store=%s "
+            "processed=%s updated=%s failed_no_text=%s failed_embedding=%s "
+            "remaining=%s done=%s",
+            after_id,
+            limit,
+            only_missing,
+            store,
+            processed,
+            updated,
+            failed_no_text,
+            failed_embedding,
+            remaining,
+            done,
+        )
+
+        return EmbeddingReindexResponse(
+            processed=processed,
+            updated=updated,
+            failed_no_text=failed_no_text,
+            failed_embedding=failed_embedding,
+            remaining=remaining,
+            next_cursor=next_cursor,
+            done=done,
+        )
+    finally:
+        lock.release()
