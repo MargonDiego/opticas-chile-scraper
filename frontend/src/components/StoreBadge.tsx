@@ -4,57 +4,60 @@ interface StoreBadgeProps {
   store: string;
 }
 
-const STORE_CONFIG: Record<string, { label: string; dotColor: string; className: string }> = {
+/**
+ * The chain identity is kept — it tells the reader where a price comes from at a
+ * glance — but it is carried by a 6px dot only. The name itself is plain muted
+ * text: no pill, no border, no mono, no uppercase, no shadow.
+ *
+ * The dot colour is the one place a chain is allowed its own hue; the text
+ * colour never changes, so the hue can never be the only thing carrying the
+ * meaning. The hues live in `globals.css` as `--store-*` tokens, at a mid
+ * lightness so one value reads on the light and the dark canvas alike.
+ */
+const STORE_CONFIG: Record<string, { label: string; dotColor: string }> = {
   gmo: {
     label: "GMO",
-    dotColor: "bg-emerald-500",
-    className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25",
+    dotColor: "bg-[var(--store-gmo)]",
   },
   place_vendome: {
     label: "Place Vendôme",
-    dotColor: "bg-purple-500",
-    className: "bg-purple-500/10 text-purple-600 dark:text-purple-300 border-purple-500/25",
+    dotColor: "bg-[var(--store-vendome)]",
   },
   ryk: {
     label: "Rotter & Krauss",
-    dotColor: "bg-blue-500",
-    className: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/25",
+    dotColor: "bg-[var(--store-rk)]",
   },
   schilling: {
     label: "Schilling",
-    dotColor: "bg-indigo-500",
-    className: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/25",
+    dotColor: "bg-[var(--store-schilling)]",
   },
   econopticas: {
     label: "Econópticas",
-    dotColor: "bg-amber-500",
-    className: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25",
+    dotColor: "bg-[var(--store-econopticas)]",
   },
   karun: {
     label: "Karün",
-    dotColor: "bg-teal-500",
-    className: "bg-teal-500/10 text-teal-600 dark:text-teal-400 border-teal-500/25",
+    dotColor: "bg-[var(--store-karun)]",
   },
   lentesplus: {
     label: "Lentesplus",
-    dotColor: "bg-cyan-500",
-    className: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/25",
+    dotColor: "bg-[var(--store-lentesplus)]",
   },
 };
 
 export function StoreBadge({ store }: StoreBadgeProps) {
   const config = STORE_CONFIG[store.toLowerCase()] || {
-    label: store.toUpperCase(),
-    dotColor: "bg-slate-400",
-    className: "bg-muted/60 text-muted-foreground border-border/80",
+    label: store,
+    dotColor: "bg-[var(--store-unknown)]",
   };
 
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full font-mono text-[10px] font-bold uppercase tracking-wider border shadow-xs transition-colors ${config.className}`}
-    >
-      <span className={`w-1.5 h-1.5 rounded-full ${config.dotColor}`} />
-      <span>{config.label}</span>
+    <span className="inline-flex min-w-0 items-center gap-1.5 text-body-sm text-muted-foreground">
+      <span
+        aria-hidden="true"
+        className={`h-1.5 w-1.5 shrink-0 rounded-full ${config.dotColor}`}
+      />
+      <span className="truncate">{config.label}</span>
     </span>
   );
 }

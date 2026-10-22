@@ -1,14 +1,16 @@
 import asyncio
 import csv
 import io
+import json
 import logging
 import re
 import time
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import JSON, func, or_, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -49,7 +51,11 @@ from src.services.advisor_nlu import (
 )
 from src.services.catalog import get_cached_catalog, map_product_read
 from src.services.embedding_text import build_embedding_text
-from src.services.ollama import ollama_service
+from src.services.ollama import (
+    EMPTY_ANSWER_FALLBACK,
+    _clean_trailing_sentence,
+    ollama_service,
+)
 from src.services.product_matcher import extract_canonical_key
 from src.services.search import (
     apply_deal_filter,
@@ -663,11 +669,34 @@ async def semantic_search(
 
 
 
-@app.post("/api/advisor/chat", response_model=AdvisorChatResponse, tags=["AI & Vector Search"], dependencies=[Depends(get_api_key)])
-async def advisor_chat(
-    req: AdvisorChatRequest,
-    session: AsyncSession = Depends(get_session),
-):
+@dataclass
+class _AdvisorPrepared:
+    """Everything the LLM step needs after the deterministic pipeline ran.
+
+    Both ``/api/advisor/chat`` and ``/api/advisor/chat/stream`` build this
+    through ``_prepare_advisor`` so intent parsing, SQL filtering and ranking
+    cannot drift between the two transports. ``canned_response`` short-circuits
+    the LLM entirely (medical guardrail); when it is set, no Ollama call is
+    allowed.
+    """
+
+    final_products: List[ProductRead]
+    context_str: str
+    is_cheap_intent: bool
+    budget_min: Optional[int]
+    budget_max: Optional[int]
+    detected_brand: Optional[str]
+    target_store: Optional[str]
+    requires_discount: bool
+    canned_response: Optional[str] = None
+
+
+async def _prepare_advisor(req: AdvisorChatRequest, session: AsyncSession) -> _AdvisorPrepared:
+    """Run the deterministic half of the advisor pipeline (NLU → SQL → filters).
+
+    Performs all database work; the caller must consume the result before the
+    response stream starts so no generator ever touches this session.
+    """
     clean_msg = req.message.lower().strip()
     raw_words = [w.strip(".,;:!?\"'()") for w in clean_msg.split()]
 
@@ -893,33 +922,134 @@ async def advisor_chat(
         stock_str = "En stock" if p.current_in_stock is not False else "Sin stock"
         context_lines.append(f"- [{p.store.upper()}] {p.brand} {p.model_name} | Precio: {price_str} | Estado: {stock_str}")
 
+    context_str = "\n".join(context_lines) if context_lines else "No hay productos coincidentes cargados."
+
     # Medical Symptom & Prescription Guardrail
     medical_terms = ["dolor", "cura", "curar", "receta", "dioptria", "dioptrías", "graduacion", "graduación", "enfermedad", "infeccion", "infección"]
     has_medical_query = any(w in medical_terms for w in raw_words) or any(t in clean_msg for t in ["me cura", "para curar", "dolor de cabeza", "receta médica"])
 
-    context_str = "\n".join(context_lines) if context_lines else "No hay productos coincidentes cargados."
-
+    canned_response = None
     if has_medical_query:
-        ai_response = (
+        canned_response = (
             "Para dolores de cabeza, síntomas visuales o determinación de graduación exacta (como tu miopía), "
             "es indispensable consultar a un oftalmólogo o tecnólogo médico para obtener tu receta oficial. "
             "A continuación te comparto opciones de armazones y lentes de contacto disponibles en el catálogo para cuando cuentes con tu receta."
         )
+
+    return _AdvisorPrepared(
+        final_products=final_products,
+        context_str=context_str,
+        is_cheap_intent=is_cheap_intent,
+        budget_min=budget_min,
+        budget_max=budget_max,
+        detected_brand=detected_brand,
+        target_store=target_store,
+        requires_discount=requires_discount,
+        canned_response=canned_response,
+    )
+
+
+@app.post("/api/advisor/chat", response_model=AdvisorChatResponse, tags=["AI & Vector Search"], dependencies=[Depends(get_api_key)])
+async def advisor_chat(
+    req: AdvisorChatRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    prepared = await _prepare_advisor(req, session)
+
+    if prepared.canned_response is not None:
+        ai_response = prepared.canned_response
     else:
         ai_response = await ollama_service.ask_advisor(
             req.message,
-            context_str,
-            is_cheap_intent=is_cheap_intent,
-            budget_min=budget_min,
-            budget_max=budget_max,
-            detected_brand=detected_brand,
-            target_store=target_store,
-            requires_discount=requires_discount,
+            prepared.context_str,
+            is_cheap_intent=prepared.is_cheap_intent,
+            budget_min=prepared.budget_min,
+            budget_max=prepared.budget_max,
+            detected_brand=prepared.detected_brand,
+            target_store=prepared.target_store,
+            requires_discount=prepared.requires_discount,
         )
 
     return AdvisorChatResponse(
         response=ai_response,
-        relevant_products=final_products,
+        relevant_products=prepared.final_products,
+    )
+
+
+def _sse_event(event: str, data: Any) -> str:
+    """Format one SSE frame; every ``data:`` line is guaranteed valid JSON."""
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+@app.post("/api/advisor/chat/stream", tags=["AI & Vector Search"], dependencies=[Depends(get_api_key)])
+async def advisor_chat_stream(
+    req: AdvisorChatRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Server-Sent-Events twin of ``/api/advisor/chat``.
+
+    The deterministic pipeline runs first and the products are fully
+    materialized BEFORE the ``StreamingResponse`` is constructed, so the
+    generator never touches the database session. The client receives the
+    product cards (``products`` event) while the LLM is still writing the
+    prose (``status`` → ``delta``* → ``done``), or an ``error`` if Ollama
+    never answered — the cards are delivered either way.
+    """
+    prepared = await _prepare_advisor(req, session)
+    products_payload = [p.model_dump(mode="json") for p in prepared.final_products]
+
+    async def event_stream() -> AsyncIterator[str]:
+        yield _sse_event("products", {"products": products_payload})
+
+        if prepared.canned_response is not None:
+            # Medical-guardrail short-circuit: no LLM call, nothing to stream.
+            yield _sse_event("done", {"message": prepared.canned_response})
+            return
+
+        yield _sse_event("status", {"phase": "generating"})
+
+        assembled: List[str] = []
+        try:
+            async for chunk in ollama_service.ask_advisor_stream(
+                req.message,
+                prepared.context_str,
+                is_cheap_intent=prepared.is_cheap_intent,
+                budget_min=prepared.budget_min,
+                budget_max=prepared.budget_max,
+                detected_brand=prepared.detected_brand,
+                target_store=prepared.target_store,
+                requires_discount=prepared.requires_discount,
+            ):
+                assembled.append(chunk)
+                yield _sse_event("delta", {"text": chunk})
+        except Exception as exc:
+            logger.error(f"Advisor stream failed after products were delivered: {exc}")
+            yield _sse_event(
+                "error",
+                {"detail": "No pudimos generar la respuesta en este momento. Los productos mostrados sí están disponibles."},
+            )
+            return
+
+        final_message = "".join(assembled)
+        if final_message != EMPTY_ANSWER_FALLBACK:
+            # Twin parity with ask_advisor: raw model text always goes through
+            # the trailing-sentence guardrail (trim the dangling fragment,
+            # guarantee the final period). ask_advisor returns its empty-answer
+            # fallback VERBATIM (no cleanup), so when the stream produced only
+            # that fallback it must skip the guardrail too — otherwise this
+            # transport would append "." after ":" where the non-streaming one
+            # does not.
+            final_message = _clean_trailing_sentence(final_message)
+        yield _sse_event("done", {"message": final_message})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
     )
 
 

@@ -2,71 +2,315 @@
 @tailwind components;
 @tailwind utilities;
 
-@layer base {
-  :root {
-    --background: 210 20% 98%;          /* #f8fafc Soft pearl gallery grey */
-    --foreground: 222 47% 11%;          /* #0f172a Deep slate text */
-    --card: 0 0% 100%;                  /* #ffffff Pure white showcase cards */
-    --card-foreground: 222 47% 11%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
-    --primary: 221 83% 53%;             /* #2563eb Optical Cobalt Blue (5.4:1 contrast) */
-    --primary-foreground: 0 0% 100%;    /* #ffffff Crisp white on cobalt */
-    --secondary: 210 30% 95%;           /* #eef2f6 Subtle slate tint */
-    --secondary-foreground: 222 47% 11%;
-    --muted: 210 25% 94%;
-    --muted-foreground: 215 16% 47%;    /* #64748b Balanced reading slate */
-    --accent: 214 95% 93%;              /* #dbeafe Soft ice blue */
-    --accent-foreground: 221 83% 53%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 214 32% 91%;              /* #e2e8f0 Crisp delicate borders */
-    --input: 214 32% 91%;
-    --ring: 221 83% 53%;
-    --radius: 0.85rem;
-  }
+/* ==========================================================================
+   Fonts — self-hosted Plus Jakarta Sans (latin subset, static per weight).
+   No third-party stylesheet in the critical path.
+   ========================================================================== */
 
-  .dark {
-    --background: 222 47% 11%;          /* #0f172a Deep nocturnal studio */
-    --foreground: 210 40% 98%;          /* #f8fafc Clean ivory text */
-    --card: 217 33% 16%;                /* #1b2432 Slate card */
-    --card-foreground: 210 40% 98%;
-    --popover: 217 33% 16%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 217 91% 60%;             /* #3b82f6 Vivid sapphire blue */
-    --primary-foreground: 0 0% 100%;
-    --secondary: 217 33% 22%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217 33% 22%;
-    --muted-foreground: 215 20% 68%;
-    --accent: 217 33% 25%;
-    --accent-foreground: 217 91% 60%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 215 28% 26%;              /* #2e3846 */
-    --input: 215 28% 26%;
-    --ring: 217 91% 60%;
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/plus-jakarta-sans-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/plus-jakarta-sans-500.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/plus-jakarta-sans-600.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/plus-jakarta-sans-700.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("/fonts/plus-jakarta-sans-800.woff2") format("woff2");
+}
+
+/* ==========================================================================
+   Design tokens.
+   Every colour variable holds a bare OKLCH channel triplet
+   (L C H) so it composes as oklch(var(--token) / <alpha>).
+   Light is the default; dark is opt-in via .dark or the OS preference.
+
+   These token declarations are deliberately UNLAYERED. Tailwind v3.4 drops
+   non-`:root` class rules inside `@layer base`, which silently killed the
+   `.dark` override. Token declarations live unlayered so both the class
+   override and the OS media query survive.
+   ========================================================================== */
+
+/* Per-store dot hues. One hue per chain, at a mid lightness, so a single
+   value reads on the light and the dark canvas alike. */
+:root {
+  --store-gmo: oklch(0.55 0.12 150);
+  --store-vendome: oklch(0.55 0.13 320);
+  --store-rk: oklch(0.55 0.12 255);
+  --store-schilling: oklch(0.55 0.13 275);
+  --store-econopticas: oklch(0.55 0.12 75);
+  --store-karun: oklch(0.55 0.10 190);
+  --store-lentesplus: oklch(0.55 0.10 215);
+  --store-unknown: oklch(0.55 0.02 250);
+}
+
+:root,
+.light {
+  --background: 0.970 0.005 235; /* canvas, cool near-white */
+  --foreground: 0.235 0.016 250; /* ink */
+  --card: 1 0 0; /* surface */
+  --card-foreground: 0.235 0.016 250;
+  --on-white: 0.235 0.016 250; /* ink for content on the always-white image well */
+  --popover: 1 0 0;
+  --popover-foreground: 0.235 0.016 250;
+  --primary: 0.470 0.082 200; /* petrol teal */
+  --primary-foreground: 0.99 0.004 200;
+  --primary-hover: 0.420 0.078 200; /* petrol hover — the button darkens, never fades */
+  --primary-active: 0.380 0.072 200; /* petrol pressed */
+  --secondary: 0.945 0.006 235; /* sunken surface */
+  --secondary-foreground: 0.235 0.016 250;
+  --muted: 0.945 0.006 235;
+  --muted-foreground: 0.480 0.014 250; /* muted ink */
+  --ink-subtle: 0.540 0.012 250; /* de-emphasised ink — still AA on canvas (4.66:1) */
+  --accent: 0.955 0.022 200; /* petrol tint */
+  --accent-foreground: 0.360 0.065 200; /* petrol tint ink */
+  --accent-hover: 0.930 0.030 200;
+  --destructive: 0.500 0.170 25;
+  --destructive-foreground: 0.99 0.004 25;
+  --destructive-hover: 0.440 0.160 25;
+  --destructive-active: 0.400 0.150 25;
+  --border: 0.892 0.006 235; /* hairline */
+  --input: 0.892 0.006 235;
+  --ring: 0.470 0.082 200;
+  --success: 0.460 0.100 150;
+  --success-foreground: 0.360 0.095 150;
+  --success-tint: 0.955 0.030 150;
+  --warning: 0.500 0.115 65;
+  --warning-foreground: 0.400 0.100 65;
+  --warning-tint: 0.960 0.032 75;
+  --danger-tint: 0.960 0.026 25;
+  --border-strong: 0.820 0.008 235;
+  --surface-sunken: 0.945 0.006 235;
+  --well-ring: oklch(0.20 0.02 250 / 0.12); /* the hairline around the image well */
+}
+
+.dark {
+  --background: 0.185 0.013 250;
+  --foreground: 0.955 0.005 235;
+  --card: 0.225 0.015 250;
+  --card-foreground: 0.955 0.005 235;
+  --on-white: 0.235 0.016 250; /* the well is white in both themes, so the ink is too */
+  --popover: 0.225 0.015 250;
+  --popover-foreground: 0.955 0.005 235;
+  --primary: 0.740 0.095 200;
+  --primary-foreground: 0.170 0.020 200;
+  --primary-hover: 0.800 0.090 200;
+  --primary-active: 0.860 0.085 200;
+  --secondary: 0.275 0.016 250;
+  --secondary-foreground: 0.955 0.005 235;
+  --muted: 0.275 0.016 250;
+  --muted-foreground: 0.735 0.014 245;
+  --ink-subtle: 0.640 0.012 245;
+  --accent: 0.290 0.030 200;
+  --accent-foreground: 0.800 0.095 200;
+  --accent-hover: 0.340 0.038 200;
+  --destructive: 0.740 0.145 25;
+  --destructive-foreground: 0.170 0.020 25;
+  --destructive-hover: 0.800 0.125 25;
+  --destructive-active: 0.850 0.110 25;
+  --border: 0.305 0.014 250;
+  --input: 0.305 0.014 250;
+  --ring: 0.740 0.095 200;
+  --success: 0.720 0.120 150;
+  --success-foreground: 0.820 0.110 150;
+  --success-tint: 0.290 0.040 150;
+  --warning: 0.760 0.120 70;
+  --warning-foreground: 0.840 0.110 75;
+  --warning-tint: 0.300 0.045 75;
+  --danger-tint: 0.300 0.055 25;
+  --border-strong: 0.400 0.016 250;
+  --surface-sunken: 0.155 0.011 250;
+  --well-ring: oklch(1 0 0 / 0.20);
+}
+
+/* Auto-dark: follows the OS preference unless `.light` is forced. */
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    --background: 0.185 0.013 250;
+    --foreground: 0.955 0.005 235;
+    --card: 0.225 0.015 250;
+    --card-foreground: 0.955 0.005 250;
+    --on-white: 0.235 0.016 250;
+    --popover: 0.225 0.015 250;
+    --popover-foreground: 0.955 0.005 235;
+    --primary: 0.740 0.095 200;
+    --primary-foreground: 0.170 0.020 200;
+    --primary-hover: 0.800 0.090 200;
+    --primary-active: 0.860 0.085 200;
+    --secondary: 0.275 0.016 250;
+    --secondary-foreground: 0.955 0.005 235;
+    --muted: 0.275 0.016 250;
+    --muted-foreground: 0.735 0.014 245;
+    --ink-subtle: 0.640 0.012 245;
+    --accent: 0.290 0.030 200;
+    --accent-foreground: 0.800 0.095 200;
+    --accent-hover: 0.340 0.038 200;
+    --destructive: 0.740 0.145 25;
+    --destructive-foreground: 0.170 0.020 25;
+    --destructive-hover: 0.800 0.125 25;
+    --destructive-active: 0.850 0.110 25;
+    --border: 0.305 0.014 250;
+    --input: 0.305 0.014 250;
+    --ring: 0.740 0.095 200;
+    --success: 0.720 0.120 150;
+    --success-foreground: 0.820 0.110 150;
+    --success-tint: 0.290 0.040 150;
+    --warning: 0.760 0.120 70;
+    --warning-foreground: 0.840 0.110 75;
+    --warning-tint: 0.300 0.045 75;
+    --danger-tint: 0.300 0.055 25;
+    --border-strong: 0.400 0.016 250;
+    --surface-sunken: 0.155 0.011 250;
+    --well-ring: oklch(1 0 0 / 0.20);
   }
 }
+
+/* ==========================================================================
+   Base layer — element rules only. The token declarations above are
+   unlayered, because Tailwind v3.4 drops non-`:root` class rules that live
+   inside `@layer base`.
+   ========================================================================== */
 
 @layer base {
   * {
-    @apply border-border;
+    border-color: oklch(var(--border));
   }
+
   body {
-    @apply bg-background text-foreground font-sans antialiased selection:bg-primary/20;
+    background-color: oklch(var(--background));
+    color: oklch(var(--foreground));
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background-color: oklch(var(--primary));
+    color: oklch(var(--primary-foreground));
+  }
+
+  /* Global focus ring — every interactive element gets a visible indicator.
+     Element-level focus styles may refine this, none remove it. */
+  :focus-visible {
+    outline: 2px solid oklch(var(--primary));
+    outline-offset: 2px;
+  }
+
+  /* Native <dialog> scrim */
+  dialog::backdrop {
+    background-color: oklch(0.20 0.02 250 / 0.45);
   }
 }
 
-/* Accessible intentional motion: disable continuous looping & vestibular triggers */
+/* ==========================================================================
+   Scale, elevation, motion and typography tokens.
+   ========================================================================== */
+
+:root {
+  --radius: 0.5625rem; /* 9px — buttons, inputs, selects */
+  --radius-sm: 0.375rem; /* 6px — chips, badges */
+  --radius-lg: 0.8125rem; /* 13px — cards, panels */
+  --radius-xl: 1.125rem; /* 18px — dialogs, sheets */
+
+  --shadow-overlay: 0 1px 2px oklch(0.20 0.02 250 / 0.06),
+    0 8px 24px -8px oklch(0.20 0.02 250 / 0.14);
+  --shadow-modal: 0 24px 48px -12px oklch(0.20 0.02 250 / 0.25);
+
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --duration-slow: 240ms;
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+}
+
+/* ==========================================================================
+   Native <select> chevron. The native arrow is removed with `appearance-none`,
+   so the field draws its own — one shape, one colour per colour scheme.
+   ========================================================================== */
+
+.select-chevron {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235b6472' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 16px 16px;
+}
+
+.dark .select-chevron {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23aab2be' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) .select-chevron {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23aab2be' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  }
+}
+
+/* ==========================================================================
+   Safe areas — unlayered on purpose so they win over Tailwind padding.
+   ========================================================================== */
+
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.safe-bottom {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+}
+
+/* ==========================================================================
+   Image well ring — the well itself is always white in both themes, so the
+   ring around it is the one thing that has to be theme aware.
+   ========================================================================== */
+
+.well-ring {
+  box-shadow: inset 0 0 0 1px var(--well-ring);
+}
+
+/* ==========================================================================
+   Reduced motion — nothing depends on an entrance animation to be visible.
+   ========================================================================== */
+
 @media (prefers-reduced-motion: reduce) {
   *,
   ::before,
   ::after {
+    animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.05s !important;
+    transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+
   .animate-spin,
   .animate-pulse,
   .animate-bounce {

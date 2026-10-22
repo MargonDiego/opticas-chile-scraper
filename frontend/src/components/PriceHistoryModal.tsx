@@ -1,14 +1,16 @@
-import React, { useEffect, useState, useId } from "react";
-import { Dialog, DialogContent, DialogTitle } from "./ui/dialog";
+import React, { useEffect, useRef, useState } from "react";
+import { Dialog } from "./ui/dialog";
+import { buttonVariants } from "./ui/button";
 import { StoreBadge } from "./StoreBadge";
-import { formatCLP } from "@/lib/utils";
+import { cn, formatCLP } from "@/lib/utils";
 import {
-  TrendingDown,
-  TrendingUp,
-  History,
+  Check,
   ExternalLink,
+  Glasses,
   Store,
-  Sparkles,
+  Tag,
+  TrendingDown,
+  X,
 } from "lucide-react";
 
 interface Snapshot {
@@ -83,6 +85,27 @@ interface ChartPoint {
   isInStock: boolean;
 }
 
+/**
+ * Chain display names. The API only carries the raw store key ("ryk",
+ * "karun", …) but the prose needs the name a Chilean would recognise
+ * ("Rotter & Krauss", "Karün"). `StoreBadge` carries the dot + name identity
+ * for the rows; this map is only for the sentences.
+ */
+const STORE_LABELS: Record<string, string> = {
+  gmo: "GMO",
+  place_vendome: "Place Vendôme",
+  ryk: "Rotter & Krauss",
+  schilling: "Schilling",
+  econopticas: "Econópticas",
+  karun: "Karün",
+  lentesplus: "Lentesplus",
+};
+
+function storeLabel(store?: string | null): string {
+  if (!store) return "otra óptica";
+  return STORE_LABELS[store.toLowerCase()] ?? store;
+}
+
 export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Props) {
   const [loading, setLoading] = useState(true);
   const [product, setProduct] = useState<ProductDetail | null>(null);
@@ -116,8 +139,6 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
       });
   }, [productId, apiBaseUrl, apiKey]);
 
-  if (!productId) return null;
-
   // Process timeline data for the SVG chart
   const snapshots = (product?.price_snapshots || []).slice().sort(
     (a, b) => new Date(a.scraped_at).getTime() - new Date(b.scraped_at).getTime()
@@ -149,459 +170,566 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
   const isCurrentAtAllTimeLow =
     minHistoricalPrice > 0 && currentEffectivePrice <= minHistoricalPrice;
 
-  // Other store matches excluding the current product
-  const otherStoreMatches = (comparison?.matches || []).filter(
-    (m) => m.product_id !== product?.id
+  const isInStock = product ? product.current_in_stock !== false : false;
+
+  const hasDiscount = Boolean(
+    product?.current_price_discount &&
+      product?.current_price_normal &&
+      product.current_price_discount < product.current_price_normal
   );
 
+  // The row the reader is currently looking at, and the cheapest row next to it.
+  const currentMatch = comparison?.matches?.find((m) => m.product_id === product?.id);
+  const currentPrice = currentMatch?.effective_price ?? currentEffectivePrice;
+
+  const cheapestMatch = (comparison?.matches || []).reduce<
+    StorePriceMatch | undefined
+  >((best, match) => {
+    if (!best) return match;
+    return (match.effective_price ?? Infinity) < (best.effective_price ?? Infinity)
+      ? match
+      : best;
+  }, undefined);
+
+  const savingsVsCurrent =
+    cheapestMatch && currentPrice && cheapestMatch.effective_price
+      ? currentPrice - cheapestMatch.effective_price
+      : 0;
+
+  const rangeLabel =
+    chartPoints.length > 0
+      ? `${chartPoints[0].dateStr.split(",")[0]} – ${
+          chartPoints[chartPoints.length - 1].dateStr.split(",")[0]
+        }`
+      : "Sin mediciones";
+
   return (
-    <Dialog open={!!productId} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent onClose={onClose} className="p-0 overflow-hidden max-w-3xl border-border bg-card">
-        {/* Modal Header with safe padding for close button */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/30 pr-14">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
-              <History className="w-4 h-4" />
-            </div>
+    <Dialog
+      open={!!productId}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+      title={
+        product ? `Precio de ${product.model_name}` : "Historial de precios"
+      }
+      description={
+        <span className="text-body-sm">
+          Historial de precios y comparación entre ópticas.
+        </span>
+      }
+      footer={
+        product ? (
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
-              <DialogTitle className="text-base font-bold text-foreground leading-snug truncate">
-                Análisis de Precios & Comparador
-              </DialogTitle>
-              <p className="text-xs text-muted-foreground truncate">
-                Monitoreo histórico y arbitraje multi-tienda
-              </p>
-            </div>
-          </div>
-
-          {/* Navigation Tabs */}
-          <div role="tablist" aria-label="Secciones del análisis de precios" className="flex items-center bg-muted/70 p-1 rounded-xl border border-border/80 text-xs font-semibold shrink-0 self-start sm:self-auto">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === "history"}
-              onClick={() => setActiveTab("history")}
-              className={`px-3 py-2 min-h-[40px] rounded-lg transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                activeTab === "history"
-                  ? "bg-background text-foreground shadow-xs"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Historial de Precios
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === "compare"}
-              onClick={() => setActiveTab("compare")}
-              className={`flex items-center gap-1.5 px-3 py-2 min-h-[40px] rounded-lg transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                activeTab === "compare"
-                  ? "bg-background text-foreground shadow-xs"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <span>Comparar Tiendas</span>
-              {otherStoreMatches.length > 0 && (
-                <span className="bg-primary/20 text-primary font-mono text-[10px] px-1.5 py-0.2 rounded-full font-bold">
-                  {comparison?.total_stores}
+              <p className="text-body-sm text-muted-foreground">Precio actual</p>
+              <div className="flex flex-wrap items-baseline gap-2">
+                <span className="text-price-lg tabular-nums text-foreground">
+                  {formatCLP(currentEffectivePrice)}
                 </span>
-              )}
-            </button>
-          </div>
-        </div>
-
-        {/* Modal Scrollable Body */}
-        <div className="p-4 sm:p-6 max-h-[80vh] overflow-y-auto space-y-5">
-          {loading ? (
-            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
-              <div className="w-8 h-8 border-3 border-primary border-t-transparent rounded-full animate-spin" />
-              <p className="text-sm font-medium">Analizando historial y tiendas cruzadas...</p>
+                {hasDiscount && (
+                  <span className="text-body-sm tabular-nums text-muted-foreground line-through">
+                    {formatCLP(product.current_price_normal)}
+                  </span>
+                )}
+              </div>
             </div>
-          ) : product ? (
-            <>
-              {/* Product Specimen Summary Banner (Responsive) */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-muted/20 p-4 rounded-2xl border border-border">
-                <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                  {product.image_url ? (
-                    <img
-                      src={product.image_url}
-                      alt={product.model_name}
-                      className="w-14 h-14 sm:w-16 sm:h-16 object-contain bg-white rounded-xl p-1 border border-border/60 shadow-xs shrink-0"
-                    />
-                  ) : (
-                    <div className="w-14 h-14 sm:w-16 sm:h-16 bg-muted rounded-xl flex items-center justify-center text-xs font-bold text-muted-foreground shrink-0">
-                      {product.brand}
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1 flex-wrap">
-                      <StoreBadge store={product.store} />
-                      <span className="text-xs font-mono font-bold uppercase tracking-wider text-muted-foreground">
-                        {product.brand}
-                      </span>
-                    </div>
-                    <h4 className="font-semibold text-sm text-foreground truncate">
-                      {product.model_name}
-                    </h4>
-                    <div className="flex items-baseline gap-2 mt-1">
-                      <span className="text-base sm:text-lg font-black font-mono text-foreground">
-                        {formatCLP(currentEffectivePrice)}
-                      </span>
-                      {product.current_price_discount &&
-                        product.current_price_normal &&
-                        product.current_price_discount < product.current_price_normal && (
-                          <span className="text-xs font-mono line-through text-muted-foreground">
-                            {formatCLP(product.current_price_normal)}
-                          </span>
-                        )}
-                    </div>
-                  </div>
-                </div>
+            <a
+              href={product.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={cn(
+                buttonVariants({ variant: "default", size: "default" }),
+                "gap-1.5"
+              )}
+            >
+              <span>Ver publicación</span>
+              <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+            </a>
+          </div>
+        ) : null
+      }
+    >
+      {/* Tabs — sticky so they stay reachable while the ledger scrolls. */}
+      <div className="sticky top-0 z-10 -mx-5 -mt-4 border-b border-border bg-card px-5 py-3">
+        <div
+          role="tablist"
+          aria-label="Secciones del historial de precios"
+          className="flex flex-wrap items-center gap-2"
+        >
+          <button
+            type="button"
+            role="tab"
+            id="tab-historial"
+            aria-selected={activeTab === "history"}
+            aria-controls="panel-historial"
+            onClick={() => setActiveTab("history")}
+            className={`min-h-11 rounded-sm px-3 text-body-sm font-semibold transition-colors duration-fast ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
+              activeTab === "history"
+                ? "bg-accent text-accent-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Historial de precios
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="tab-tiendas"
+            aria-selected={activeTab === "compare"}
+            aria-controls="panel-tiendas"
+            onClick={() => setActiveTab("compare")}
+            className={`inline-flex min-h-11 items-center gap-1.5 rounded-sm px-3 text-body-sm font-semibold transition-colors duration-fast ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
+              activeTab === "compare"
+                ? "bg-accent text-accent-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <span>Comparar tiendas</span>
+            {comparison && comparison.total_stores > 0 && (
+              <span className="rounded-sm bg-muted px-1.5 py-0.5 text-body-sm tabular-nums text-muted-foreground">
+                {comparison.total_stores}
+              </span>
+            )}
+          </button>
+        </div>
+      </div>
 
-                <a
-                  href={product.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center gap-1.5 text-xs font-bold px-4 py-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-all shadow-xs shrink-0 w-full sm:w-auto"
-                >
-                  <span>Ver Tienda</span>
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
+      {loading ? (
+        <div className="flex flex-col items-center justify-center gap-3 py-16 text-muted-foreground">
+          <div
+            className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent"
+            aria-hidden="true"
+          />
+          <p className="text-body-sm">Cargando historial y comparación…</p>
+        </div>
+      ) : product ? (
+        <div className="space-y-6 pt-4">
+          {/* What the reader is looking at. */}
+          <div className="flex items-center gap-4">
+            {product.image_url ? (
+              <img
+                src={product.image_url}
+                alt={product.model_name}
+                loading="lazy"
+                className="h-16 w-16 shrink-0 rounded-md bg-white p-1 object-contain well-ring"
+              />
+            ) : (
+              <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-md bg-white well-ring">
+                <Glasses
+                  className="h-5 w-5 text-muted-foreground opacity-40"
+                  aria-hidden="true"
+                />
+              </div>
+            )}
+            <div className="min-w-0">
+              <StoreBadge store={product.store} />
+              <p className="mt-0.5 text-body-sm text-muted-foreground">{product.brand}</p>
+            </div>
+          </div>
+
+          <div
+            id="panel-historial"
+            role="tabpanel"
+            aria-labelledby="tab-historial"
+            hidden={activeTab !== "history"}
+            className="space-y-6"
+          >
+            {/* One data readout, three figures, hairline separated. */}
+            <div className="grid grid-cols-1 gap-y-3 sm:grid-cols-3">
+              <div className="min-w-0 sm:pr-4">
+                <p className="text-body-sm text-muted-foreground">Mínimo histórico</p>
+                <p className="text-price tabular-nums text-foreground">
+                  {minHistoricalPrice > 0 ? formatCLP(minHistoricalPrice) : "Sin datos"}
+                </p>
+                {isCurrentAtAllTimeLow && (
+                  <span className="mt-1 inline-flex items-center gap-1 rounded-sm bg-success-tint px-2 py-1 text-body-sm font-semibold text-success-foreground">
+                    <TrendingDown className="h-3.5 w-3.5" aria-hidden="true" />
+                    Mejor precio hoy
+                  </span>
+                )}
               </div>
 
-              {/* TAB 1: HISTORICAL PRICE FLUCTUATIONS (KEEPA/KNASTA STYLE) */}
-              {activeTab === "history" && (
-                <div className="space-y-5">
-                  {/* Historical Key Metrics Cards */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="p-3.5 rounded-xl border border-border bg-card/60 space-y-1">
-                      <p className="text-[11px] font-mono font-semibold uppercase tracking-wider text-muted-foreground">
-                        Mínimo Histórico
-                      </p>
-                      <p className="text-base font-black font-mono text-emerald-600 dark:text-emerald-400">
-                        {minHistoricalPrice > 0 ? formatCLP(minHistoricalPrice) : "N/D"}
-                      </p>
-                      {isCurrentAtAllTimeLow && (
-                        <span className="inline-block text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-600">
-                          ★ Mejor Precio Hoy
-                        </span>
-                      )}
-                    </div>
+              <div className="min-w-0 sm:border-l sm:border-border sm:px-4">
+                <p className="text-body-sm text-muted-foreground">Máximo registrado</p>
+                <p className="text-price tabular-nums text-foreground">
+                  {maxHistoricalPrice > 0 ? formatCLP(maxHistoricalPrice) : "Sin datos"}
+                </p>
+                <p className="text-body-sm tabular-nums text-muted-foreground">
+                  {chartPoints.length} mediciones
+                </p>
+              </div>
 
-                    <div className="p-3.5 rounded-xl border border-border bg-card/60 space-y-1">
-                      <p className="text-[11px] font-mono font-semibold uppercase tracking-wider text-muted-foreground">
-                        Máximo Registrado
-                      </p>
-                      <p className="text-base font-black font-mono text-foreground">
-                        {maxHistoricalPrice > 0 ? formatCLP(maxHistoricalPrice) : "N/D"}
-                      </p>
-                      <span className="inline-block text-[10px] font-mono text-muted-foreground">
-                        {chartPoints.length} mediciones
+              <div className="min-w-0 sm:border-l sm:border-border sm:pl-4">
+                <p className="text-body-sm text-muted-foreground">Disponibilidad</p>
+                <p
+                  className={`inline-flex items-center gap-1.5 text-price tabular-nums ${
+                    isInStock ? "text-success-foreground" : "text-destructive"
+                  }`}
+                >
+                  {isInStock ? (
+                    <Check className="h-4 w-4" aria-hidden="true" />
+                  ) : (
+                    <X className="h-4 w-4" aria-hidden="true" />
+                  )}
+                  {isInStock ? "En stock" : "Agotado"}
+                </p>
+                <p className="text-body-sm text-muted-foreground">
+                  {storeLabel(product.store)}
+                </p>
+              </div>
+            </div>
+
+            {/* The series. Graphical only — every label lives in HTML. */}
+            <div className="rounded-lg border border-border bg-surface-sunken p-4">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h3 className="text-label text-muted-foreground">Serie de precios</h3>
+                {hoveredPoint ? (
+                  <p className="text-body-sm">
+                    <span className="text-muted-foreground">{hoveredPoint.dateStr}</span>
+                    <span className="ml-2 font-semibold tabular-nums text-foreground">
+                      {formatCLP(hoveredPoint.effectivePrice)}
+                    </span>
+                    {hoveredPoint.discountPct ? (
+                      <span className="ml-1.5 tabular-nums text-success-foreground">
+                        -{hoveredPoint.discountPct}%
                       </span>
-                    </div>
+                    ) : null}
+                  </p>
+                ) : (
+                  <p className="text-body-sm text-muted-foreground">
+                    Toca la gráfica para ver cada medición
+                  </p>
+                )}
+              </div>
 
-                    <div className="p-3.5 rounded-xl border border-border bg-card/60 space-y-1">
-                      <p className="text-[11px] font-mono font-semibold uppercase tracking-wider text-muted-foreground">
-                        Disponibilidad
-                      </p>
-                      <p
-                        className={`text-base font-black font-mono ${
-                          product.current_in_stock !== false
-                            ? "text-emerald-600 dark:text-emerald-400"
-                            : "text-rose-600 dark:text-rose-400"
-                        }`}
-                      >
-                        {product.current_in_stock !== false ? "En Stock" : "Agotado"}
-                      </p>
-                      <span className="inline-block text-[10px] font-mono text-muted-foreground capitalize">
-                        {product.store}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Interactive SVG Price Chart */}
-                  <div className="p-4 rounded-2xl border border-border bg-zinc-50 dark:bg-zinc-950/60 space-y-3">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                      <h5 className="text-xs font-mono font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                        <TrendingDown className="w-4 h-4 text-primary" />
-                        Serie Temporal de Fluctuaciones
-                      </h5>
-                      {hoveredPoint ? (
-                        <div className="font-mono text-xs">
-                          <span className="text-muted-foreground mr-2">{hoveredPoint.dateStr}:</span>
-                          <span className="font-bold text-foreground">
-                            {formatCLP(hoveredPoint.effectivePrice)}
-                          </span>
-                          {hoveredPoint.discountPct && (
-                            <span className="text-emerald-600 ml-1.5 font-bold">
-                              (-{hoveredPoint.discountPct}%)
-                            </span>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-[11px] font-mono text-muted-foreground">
-                          Pasa el cursor sobre la gráfica
-                        </span>
-                      )}
-                    </div>
-
-                    {chartPoints.length > 0 ? (
-                      <div className="relative w-full aspect-[21/9] sm:aspect-[24/8] select-none">
-                        <PriceSvgChart
-                          points={chartPoints}
-                          onHoverPoint={setHoveredPoint}
-                          hoveredPoint={hoveredPoint}
-                        />
-                      </div>
-                    ) : (
-                      <div className="py-12 text-center text-xs text-muted-foreground">
-                        No hay suficientes registros temporales aún.
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Historical Snapshots Raw Ledger */}
-                  <div>
-                    <h5 className="text-xs font-mono font-bold uppercase tracking-wider text-muted-foreground mb-3">
-                      Capturas Registradas ({snapshots.length})
-                    </h5>
-                    <div className="space-y-2">
-                      {snapshots.map((snap, idx) => {
-                        const isDiscount =
-                          snap.price_discount && snap.price_discount < snap.price_normal;
-                        const dateFormatted = new Date(snap.scraped_at).toLocaleString("es-CL", {
-                          dateStyle: "medium",
-                          timeStyle: "short",
-                        });
-
-                        return (
-                          <div
-                            key={snap.id || idx}
-                            className="flex items-center justify-between p-3 rounded-xl border border-border bg-card/60 hover:bg-muted/30 transition-colors text-sm"
-                          >
-                            <div className="flex items-center gap-3">
-                              {isDiscount ? (
-                                <div className="w-8 h-8 rounded-full bg-emerald-500/15 text-emerald-600 flex items-center justify-center shrink-0">
-                                  <TrendingDown className="w-4 h-4" />
-                                </div>
-                              ) : (
-                                <div className="w-8 h-8 rounded-full bg-slate-500/15 text-slate-600 flex items-center justify-center shrink-0">
-                                  <TrendingUp className="w-4 h-4" />
-                                </div>
-                              )}
-                              <div>
-                                <p className="font-mono text-xs text-muted-foreground">
-                                  {dateFormatted}
-                                </p>
-                                <span
-                                  className={`inline-block text-xs font-medium ${
-                                    snap.is_in_stock ? "text-emerald-600" : "text-rose-600"
-                                  }`}
-                                >
-                                  {snap.is_in_stock ? "● En Stock" : "○ Agotado"}
-                                </span>
-                              </div>
-                            </div>
-
-                            <div className="text-right font-mono">
-                              {isDiscount ? (
-                                <div>
-                                  <span className="font-bold text-emerald-600">
-                                    {formatCLP(snap.price_discount)}
-                                  </span>
-                                  <div className="flex items-center justify-end gap-1.5 mt-0.5">
-                                    <span className="text-xs line-through text-muted-foreground">
-                                      {formatCLP(snap.price_normal)}
-                                    </span>
-                                    <span className="text-[10px] bg-emerald-500/20 text-emerald-700 px-1.5 py-0.2 rounded font-bold">
-                                      -{snap.discount_percentage}%
-                                    </span>
-                                  </div>
-                                </div>
-                              ) : (
-                                <span className="font-bold text-foreground">
-                                  {formatCLP(snap.price_normal)}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
+              {chartPoints.length > 0 ? (
+                <div className="mt-3">
+                  <PriceSvgChart
+                    points={chartPoints}
+                    activePoint={hoveredPoint}
+                    onPointChange={setHoveredPoint}
+                    modelName={product.model_name}
+                  />
                 </div>
+              ) : (
+                <p className="py-12 text-center text-body-sm text-muted-foreground">
+                  No hay suficientes registros temporales aún.
+                </p>
               )}
 
-              {/* TAB 2: MULTI-STORE CROSS-STORE COMPARISON & ARBITRAGE (FEATURE 1) */}
-              {activeTab === "compare" && (
-                <div className="space-y-4">
-                  {/* Arbitrage Summary Banner */}
-                  {comparison && comparison.max_arbitrage_amount > 0 ? (
-                    <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 flex items-start gap-3">
-                      <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-600 flex items-center justify-center shrink-0 mt-0.5">
-                        <Sparkles className="w-4 h-4" />
-                      </div>
-                      <div className="space-y-1">
-                        <h5 className="text-sm font-bold text-emerald-700 dark:text-emerald-300">
-                          Oportunidad de Arbitraje Detectada
-                        </h5>
-                        <p className="text-xs text-emerald-800 dark:text-emerald-200 leading-relaxed">
-                          Puedes ahorrar hasta{" "}
-                          <strong className="font-mono">
-                            {formatCLP(comparison.max_arbitrage_amount)}
-                          </strong>{" "}
-                          ({comparison.max_arbitrage_percentage}% de diferencia) comprando este
-                          mismo modelo en{" "}
-                          <strong className="capitalize">{comparison.cheapest_store}</strong> en
-                          lugar de la tienda con mayor precio.
+              <div className="mt-3 flex flex-wrap items-baseline justify-between gap-2 text-body-sm text-muted-foreground">
+                <span className="tabular-nums">
+                  Mínimo{" "}
+                  {minHistoricalPrice > 0 ? formatCLP(minHistoricalPrice) : "Sin datos"}
+                </span>
+                <span className="tabular-nums">
+                  Máximo{" "}
+                  {maxHistoricalPrice > 0 ? formatCLP(maxHistoricalPrice) : "Sin datos"}
+                </span>
+                <span>{rangeLabel}</span>
+              </div>
+            </div>
+
+            {/* The same series, readable without a pointer. */}
+            <table className="sr-only">
+              <caption>Serie de precios de {product.model_name}</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Fecha</th>
+                  <th scope="col">Precio normal</th>
+                  <th scope="col">Precio con descuento</th>
+                  <th scope="col">Precio final</th>
+                  <th scope="col">Disponible</th>
+                </tr>
+              </thead>
+              <tbody>
+                {chartPoints.map((point, index) => (
+                  <tr key={index}>
+                    <td>
+                      {point.date.toLocaleString("es-CL", {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      })}
+                    </td>
+                    <td>{formatCLP(point.priceNormal)}</td>
+                    <td>{point.priceDiscount ? formatCLP(point.priceDiscount) : "—"}</td>
+                    <td>{formatCLP(point.effectivePrice)}</td>
+                    <td>{point.isInStock ? "Sí" : "No"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {/* The raw ledger. */}
+            <section>
+              <h3 className="text-label text-muted-foreground">
+                Capturas registradas ({snapshots.length})
+              </h3>
+              <ul className="mt-2 divide-y divide-border">
+                {snapshots.map((snap, idx) => {
+                  const isDiscount = Boolean(
+                    snap.price_discount && snap.price_discount < snap.price_normal
+                  );
+                  const dateFormatted = new Date(snap.scraped_at).toLocaleString("es-CL", {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  });
+
+                  return (
+                    <li
+                      key={snap.id || idx}
+                      className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1 py-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-body-sm tabular-nums text-muted-foreground">
+                          {dateFormatted}
+                        </p>
+                        <p
+                          className={`inline-flex items-center gap-1.5 text-body-sm ${
+                            snap.is_in_stock
+                              ? "text-success-foreground"
+                              : "text-destructive"
+                          }`}
+                        >
+                          {snap.is_in_stock ? (
+                            <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                          ) : (
+                            <X className="h-3.5 w-3.5" aria-hidden="true" />
+                          )}
+                          {snap.is_in_stock ? "En stock" : "Agotado"}
                         </p>
                       </div>
-                    </div>
-                  ) : (
-                    <div className="p-3.5 rounded-2xl bg-muted/30 border border-border flex items-center gap-3 text-xs text-muted-foreground">
-                      <Store className="w-4 h-4 text-primary shrink-0" />
-                      <span>
-                        Este modelo fue identificado en {comparison?.total_stores || 1}{" "}
-                        {comparison?.total_stores === 1 ? "tienda" : "tiendas"} con{" "}
-                        {comparison?.total_listings || 1} opciones en catálogo.
-                      </span>
-                    </div>
-                  )}
 
-                  {/* Multi-Store Comparison Listings (Structured CSS Grid / Flex) */}
-                  <div className="space-y-3">
-                    <h5 className="text-xs font-mono font-bold uppercase tracking-wider text-muted-foreground">
-                      Comparativa por Óptica en Chile ({comparison?.matches.length || 0})
-                    </h5>
-
-                    {comparison?.matches && comparison.matches.length > 0 ? (
-                      comparison.matches.map((item, idx) => {
-                        const isCheapest =
-                          comparison.lowest_price && item.effective_price === comparison.lowest_price;
-                        const isCurrentBase = item.product_id === product.id;
-
-                        return (
-                          <div
-                            key={item.product_id || idx}
-                            className={`p-4 rounded-2xl border transition-all flex flex-col gap-3 ${
-                              isCurrentBase
-                                ? "bg-primary/5 border-primary/30 ring-1 ring-primary/20"
-                                : "bg-card border-border/80 hover:border-foreground/20 shadow-xs"
-                            }`}
-                          >
-                            {/* 1. Top Badges Strip */}
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <StoreBadge store={item.store} />
-                                {isCurrentBase && (
-                                  <span className="text-[10px] font-mono bg-primary/20 text-primary px-2 py-0.5 rounded-md font-bold shrink-0">
-                                    Estás viendo este
-                                  </span>
-                                )}
-                                {isCheapest && (
-                                  <span className="text-[10px] font-mono bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded-md font-bold shrink-0 flex items-center gap-1">
-                                    ★ Mejor Precio
-                                  </span>
-                                )}
-                              </div>
-                              <span
-                                className={`text-xs font-mono font-semibold ${
-                                  item.is_in_stock
-                                    ? "text-emerald-600 dark:text-emerald-400"
-                                    : "text-rose-600 dark:text-rose-400"
-                                }`}
-                              >
-                                {item.is_in_stock ? "● En Stock" : "○ Sin Stock"}
+                      <div className="text-right">
+                        {isDiscount ? (
+                          <div className="flex flex-col items-end">
+                            <span className="inline-flex items-center gap-1.5 text-price tabular-nums text-success-foreground">
+                              <Tag className="h-3.5 w-3.5" aria-hidden="true" />
+                              {formatCLP(snap.price_discount)}
+                            </span>
+                            <div className="mt-0.5 flex items-center justify-end gap-1.5">
+                              <span className="text-body-sm tabular-nums text-muted-foreground line-through">
+                                {formatCLP(snap.price_normal)}
+                              </span>
+                              <span className="rounded-sm bg-success-tint px-1.5 py-0.5 text-body-sm font-semibold tabular-nums text-success-foreground">
+                                -{snap.discount_percentage}%
                               </span>
                             </div>
-
-                            {/* 2. Model Title & Differential Note */}
-                            <div className="space-y-1">
-                              <h6 className="font-semibold text-sm text-foreground leading-snug">
-                                {item.model_name}
-                              </h6>
-                              {item.savings_vs_base > 0 && (
-                                <p className="text-xs font-mono text-emerald-600 dark:text-emerald-400 font-bold">
-                                  Ahorras {formatCLP(item.savings_vs_base)} respecto a esta tienda
-                                </p>
-                              )}
-                            </div>
-
-                            {/* 3. Bottom Row: Price & External Action Button */}
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between pt-2 border-t border-border/50 gap-3">
-                              <div className="font-mono">
-                                <div className="flex items-baseline gap-2">
-                                  <span className="text-base sm:text-lg font-black text-foreground">
-                                    {item.effective_price
-                                      ? formatCLP(item.effective_price)
-                                      : "A consultar"}
-                                  </span>
-                                  {item.price_discount &&
-                                    item.price_normal &&
-                                    item.price_discount < item.price_normal && (
-                                      <span className="text-xs line-through text-muted-foreground">
-                                        {formatCLP(item.price_normal)}
-                                      </span>
-                                    )}
-                                </div>
-                              </div>
-
-                              <a
-                                href={item.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className={`inline-flex items-center justify-center gap-1.5 text-xs font-bold px-4 py-2 rounded-xl transition-all shadow-xs shrink-0 w-full sm:w-auto ${
-                                  isCheapest
-                                    ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                                    : "bg-primary text-primary-foreground hover:bg-primary/90"
-                                }`}
-                              >
-                                <span>Ver en {item.store.toUpperCase()}</span>
-                                <ExternalLink className="w-3.5 h-3.5" />
-                              </a>
-                            </div>
                           </div>
-                        );
-                      })
-                    ) : (
-                      <p className="text-xs text-muted-foreground text-center py-6">
-                        No se encontraron otras publicaciones para este modelo en otras ópticas.
-                      </p>
-                    )}
-                  </div>
-                </div>
+                        ) : (
+                          <span className="text-price tabular-nums text-foreground">
+                            {formatCLP(snap.price_normal)}
+                          </span>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          </div>
+
+          <div
+            id="panel-tiendas"
+            role="tabpanel"
+            aria-labelledby="tab-tiendas"
+            hidden={activeTab !== "compare"}
+            className="space-y-5"
+          >
+            {/* The spread, stated as a fact. */}
+            {cheapestMatch && savingsVsCurrent > 0 ? (
+              <div className="flex items-start gap-3 rounded-lg bg-success-tint p-4">
+                <TrendingDown
+                  className="mt-0.5 h-5 w-5 shrink-0 text-success-foreground"
+                  aria-hidden="true"
+                />
+                <p className="text-body text-success-foreground">
+                  En {storeLabel(cheapestMatch.store)} este modelo está{" "}
+                  {formatCLP(savingsVsCurrent)} más barato.
+                </p>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 rounded-lg border border-border p-4">
+                <Store className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <p className="text-body-sm text-muted-foreground">
+                  Este modelo aparece en {comparison?.total_stores || 1}{" "}
+                  {comparison?.total_stores === 1 ? "óptica" : "ópticas"} con{" "}
+                  {comparison?.total_listings || 1} publicaciones en el catálogo.
+                </p>
+              </div>
+            )}
+
+            <section>
+              <h3 className="text-label text-muted-foreground">
+                Comparativa por óptica ({comparison?.matches.length || 0})
+              </h3>
+
+              {comparison?.matches && comparison.matches.length > 0 ? (
+                <ul className="mt-2 divide-y divide-border">
+                  {comparison.matches.map((item, idx) => {
+                    const isCheapest =
+                      comparison.lowest_price !== undefined &&
+                      item.effective_price === comparison.lowest_price;
+                    const isCurrentBase = item.product_id === product.id;
+                    const savings =
+                      currentPrice && item.effective_price
+                        ? currentPrice - item.effective_price
+                        : 0;
+                    const itemHasDiscount = Boolean(
+                      item.price_discount &&
+                        item.price_normal &&
+                        item.price_discount < item.price_normal
+                    );
+
+                    return (
+                      <li
+                        key={item.product_id || idx}
+                        className={cn(
+                          "flex flex-wrap items-start justify-between gap-x-4 gap-y-2 py-3",
+                          isCurrentBase && "-mx-3 rounded-md bg-accent px-3"
+                        )}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <StoreBadge store={item.store} />
+                            {isCurrentBase && (
+                              <span className="text-body-sm font-semibold text-accent-foreground">
+                                Estás viendo este
+                              </span>
+                            )}
+                            {isCheapest && (
+                              <span className="inline-flex items-center gap-1 rounded-sm bg-success-tint px-2 py-1 text-body-sm font-semibold text-success-foreground">
+                                <TrendingDown className="h-3.5 w-3.5" aria-hidden="true" />
+                                Mejor precio
+                                {savings > 0 ? ` · ${formatCLP(savings)}` : ""}
+                              </span>
+                            )}
+                          </div>
+
+                          <p className="mt-1 text-title text-foreground">{item.model_name}</p>
+
+                          <p
+                            className={`mt-0.5 inline-flex items-center gap-1.5 text-body-sm ${
+                              item.is_in_stock
+                                ? "text-success-foreground"
+                                : "text-destructive"
+                            }`}
+                          >
+                            {item.is_in_stock ? (
+                              <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                            ) : (
+                              <X className="h-3.5 w-3.5" aria-hidden="true" />
+                            )}
+                            {item.is_in_stock ? "En stock" : "Sin stock"}
+                          </p>
+                        </div>
+
+                        <div className="flex shrink-0 flex-col items-end gap-1">
+                          <span className="text-price tabular-nums text-foreground">
+                            {item.effective_price
+                              ? formatCLP(item.effective_price)
+                              : "A consultar"}
+                          </span>
+                          {itemHasDiscount && (
+                            <span className="text-body-sm tabular-nums text-muted-foreground line-through">
+                              {formatCLP(item.price_normal)}
+                            </span>
+                          )}
+                          <a
+                            href={item.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={cn(
+                              buttonVariants({ variant: "secondary", size: "sm" }),
+                              "min-h-11 gap-1.5"
+                            )}
+                          >
+                            <span>Ver publicación</span>
+                            <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                          </a>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="mt-3 text-body-sm text-muted-foreground">
+                  No se encontraron otras publicaciones de este modelo en otras ópticas.
+                </p>
               )}
-            </>
-          ) : (
-            <p className="text-sm text-rose-500 text-center py-8">
-              No se pudo cargar la información del producto.
-            </p>
-          )}
+            </section>
+          </div>
         </div>
-      </DialogContent>
+      ) : (
+        <p className="py-8 text-center text-body-sm text-destructive">
+          No se pudo cargar la información del producto.
+        </p>
+      )}
     </Dialog>
   );
 }
 
-// Interactive SVG Price Graph Component
 interface PriceSvgChartProps {
   points: ChartPoint[];
-  onHoverPoint: (pt: ChartPoint | null) => void;
-  hoveredPoint: ChartPoint | null;
+  activePoint: ChartPoint | null;
+  onPointChange: (point: ChartPoint | null) => void;
+  modelName: string;
 }
 
-function PriceSvgChart({ points, onHoverPoint, hoveredPoint }: PriceSvgChartProps) {
-  const gradientId = useId();
-  if (!points || points.length === 0) return null;
+/**
+ * The price series. The SVG carries nothing but geometry — grid, line, area
+ * and the current point — so it can scale to any width without shrinking text
+ * into illegibility. Every label lives in the HTML around it, and the values
+ * are repeated in a visually hidden table for screen readers.
+ *
+ * The viewport is measured so the drawing is 1:1 with CSS pixels: the stroke
+ * keeps its weight, the markers stay round, and a pointer maps exactly onto
+ * the series.
+ */
+function PriceSvgChart({
+  points,
+  activePoint,
+  onPointChange,
+  modelName,
+}: PriceSvgChartProps) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const pointerDownRef = useRef(false);
+  const [size, setSize] = useState({ width: 0, height: 0 });
 
-  const width = 600;
-  const height = 180;
-  const padTop = 20;
-  const padBottom = 30;
-  const padLeft = 65;
-  const padRight = 20;
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
 
-  const chartW = width - padLeft - padRight;
-  const chartH = height - padTop - padBottom;
+    const measure = () => {
+      const rect = el.getBoundingClientRect();
+      const width = Math.round(rect.width);
+      const height = Math.round(rect.height);
+      setSize((prev) =>
+        prev.width === width && prev.height === height
+          ? prev
+          : { width, height }
+      );
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  if (points.length === 0) return null;
+
+  const width = size.width;
+  const height = size.height;
+
+  const padTop = 12;
+  const padBottom = 10;
+  const padLeft = 8;
+  const padRight = 8;
+
+  const chartW = Math.max(1, width - padLeft - padRight);
+  const chartH = Math.max(1, height - padTop - padBottom);
 
   const prices = points.map((p) => p.effectivePrice);
   const minP = Math.min(...prices);
@@ -622,7 +750,6 @@ function PriceSvgChart({ points, onHoverPoint, hoveredPoint }: PriceSvgChartProp
     return padTop + chartH - ((price - yMin) / ySpan) * chartH;
   };
 
-  // Build SVG Path
   const coordinates = points.map((p, idx) => ({
     x: getX(idx),
     y: getY(p.effectivePrice),
@@ -634,111 +761,137 @@ function PriceSvgChart({ points, onHoverPoint, hoveredPoint }: PriceSvgChartProp
     return `${acc} L ${curr.x} ${curr.y}`;
   }, "");
 
-  const areaD = `${pathD} L ${coordinates[coordinates.length - 1].x} ${
-    padTop + chartH
-  } L ${coordinates[0].x} ${padTop + chartH} Z`;
+  const baselineY = padTop + chartH;
+  const areaD = `${pathD} L ${coordinates[coordinates.length - 1].x} ${baselineY} L ${
+    coordinates[0].x
+  } ${baselineY} Z`;
 
-  // Grid levels
-  const midP = Math.round((maxP + minP) / 2);
-  const gridLevels = [
-    { label: formatCLP(maxP), y: getY(maxP) },
-    { label: formatCLP(midP), y: getY(midP) },
-    { label: formatCLP(minP), y: getY(minP) },
-  ];
+  const midP = (maxP + minP) / 2;
+  const gridLevels = [maxP, midP, minP].map((price) => getY(price));
+
+  const current = coordinates[coordinates.length - 1];
+  const activeCoordinate = activePoint
+    ? coordinates.find((coord) => coord.point === activePoint)
+    : undefined;
+
+  const updateFromPointer = (event: React.PointerEvent<SVGSVGElement>) => {
+    const svg = svgRef.current;
+    if (!svg || width === 0) return;
+
+    const rect = svg.getBoundingClientRect();
+    if (rect.width === 0) return;
+
+    // "meet" fit: the drawing may be letterboxed inside the element.
+    const scale = Math.min(rect.width / width, rect.height / height);
+    const offsetX = (rect.width - width * scale) / 2;
+    const pointerX = (event.clientX - rect.left - offsetX) / scale;
+
+    let nearest = coordinates[0];
+    let bestDistance = Infinity;
+    for (const coord of coordinates) {
+      const distance = Math.abs(coord.x - pointerX);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        nearest = coord;
+      }
+    }
+
+    onPointChange(nearest.point);
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (event.pointerType === "mouse" || pointerDownRef.current) {
+      updateFromPointer(event);
+    }
+  };
+
+  const handlePointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
+    pointerDownRef.current = true;
+    updateFromPointer(event);
+  };
+
+  const handlePointerUp = () => {
+    pointerDownRef.current = false;
+  };
+
+  const handlePointerLeave = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (event.pointerType === "mouse" && !pointerDownRef.current) {
+      onPointChange(null);
+    }
+  };
+
+  const ariaLabel = `Serie de precios de ${modelName} entre ${
+    points[0].dateStr
+  } y ${points[points.length - 1].dateStr}, de ${formatCLP(minP)} a ${formatCLP(maxP)}.`;
 
   return (
-    <svg
-      viewBox={`0 0 ${width} ${height}`}
-      className="w-full h-full overflow-visible"
-      onMouseLeave={() => onHoverPoint(null)}
+    <div
+      ref={wrapRef}
+      className="aspect-[4/3] w-full sm:aspect-[21/9]"
     >
-      <defs>
-        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#10b981" stopOpacity="0.35" />
-          <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
-        </linearGradient>
-      </defs>
-
-      {/* Background Grid Lines */}
-      {gridLevels.map((lvl, idx) => (
-        <g key={idx} className="opacity-40">
-          <line
-            x1={padLeft}
-            y1={lvl.y}
-            x2={width - padRight}
-            y2={lvl.y}
-            stroke="currentColor"
-            strokeDasharray="3 3"
-            strokeWidth="0.8"
-            className="text-border"
-          />
-          <text
-            x={padLeft - 8}
-            y={lvl.y + 3}
-            textAnchor="end"
-            fontSize="9"
-            fontFamily="monospace"
-            className="fill-muted-foreground"
-          >
-            {lvl.label}
-          </text>
-        </g>
-      ))}
-
-      {/* Filled Area Gradient */}
-      <path d={areaD} fill={`url(#${gradientId})`} />
-
-      {/* Main Curve Line */}
-      <path
-        d={pathD}
-        fill="none"
-        stroke="#10b981"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-
-      {/* Data Points and Hover Target Hitboxes */}
-      {coordinates.map((coord, idx) => {
-        const isHovered = hoveredPoint === coord.point;
-        const isMin = coord.point.effectivePrice === minP;
-
-        return (
-          <g
-            key={idx}
-            className="cursor-pointer"
-            onMouseEnter={() => onHoverPoint(coord.point)}
-          >
-            {/* Expanded invisible hover hitbox */}
-            <circle cx={coord.x} cy={coord.y} r="14" fill="transparent" />
-
-            {/* Visual Dot */}
-            <circle
-              cx={coord.x}
-              cy={coord.y}
-              r={isHovered ? 6 : isMin ? 4.5 : 3.5}
-              fill={isMin ? "#10b981" : "#ffffff"}
-              stroke={isMin ? "#ffffff" : "#10b981"}
-              strokeWidth={isHovered ? 3 : 2}
-              className="transition-all duration-150"
+      {width > 0 && height > 0 && (
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${width} ${height}`}
+          role="img"
+          aria-label={ariaLabel}
+          tabIndex={0}
+          className="h-full w-full touch-pan-y select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          onPointerMove={handlePointerMove}
+          onPointerDown={handlePointerDown}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          onPointerLeave={handlePointerLeave}
+        >
+          {/* Grid lines — no labels, they live in the HTML readout. */}
+          {gridLevels.map((y, index) => (
+            <line
+              key={index}
+              x1={padLeft}
+              y1={y}
+              x2={width - padRight}
+              y2={y}
+              stroke="currentColor"
+              strokeDasharray="3 3"
+              strokeWidth="1"
+              className="text-border"
             />
+          ))}
 
-            {/* X-axis Date Label (First, Middle, Last) */}
-            {(idx === 0 || idx === coordinates.length - 1 || idx === Math.floor(coordinates.length / 2)) && (
-              <text
-                x={coord.x}
-                y={padTop + chartH + 18}
-                textAnchor={idx === 0 ? "start" : idx === coordinates.length - 1 ? "end" : "middle"}
-                fontSize="9"
-                fontFamily="monospace"
-                className="fill-muted-foreground"
-              >
-                {coord.point.dateStr.split(",")[0]}
-              </text>
-            )}
-          </g>
-        );
-      })}
-    </svg>
+          {/* Area under the series — flat, never a gradient. */}
+          <path d={areaD} className="fill-primary/10" />
+
+          {/* The series itself. */}
+          <path
+            d={pathD}
+            fill="none"
+            className="stroke-primary"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+
+          {/* The current point. */}
+          <circle
+            cx={current.x}
+            cy={current.y}
+            r="4.5"
+            strokeWidth="2"
+            className="fill-primary stroke-surface-sunken"
+          />
+
+          {/* The probed point, when there is one. */}
+          {activeCoordinate && (
+            <circle
+              cx={activeCoordinate.x}
+              cy={activeCoordinate.y}
+              r="6"
+              strokeWidth="2"
+              className="fill-card stroke-primary"
+            />
+          )}
+        </svg>
+      )}
+    </div>
   );
 }

@@ -3,6 +3,7 @@ import react from "@astrojs/react";
 import tailwind from "@astrojs/tailwind";
 
 export default defineConfig({
+  site: "https://lentes.ste-tellega.com",
   integrations: [
     react(),
     tailwind({
