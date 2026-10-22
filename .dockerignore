@@ -1,0 +1,41 @@
+# Python tooling / runtime artifacts
+.git
+.gitignore
+.venv
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local data, secrets and dev environment files
+# NOTE: .env.example must stay available for image builds and shells.
+data/
+.env
+.env.*
+!.env.example
+
+# Tests are not needed inside the runtime image
+tests/
+
+# The frontend is built by its own Dockerfile (frontend/Dockerfile)
+frontend/
+node_modules/
+
+# Agent / editor / CI metadata
+.atl/
+.opencode/
+.claude/
+.github/
+
+# Documentation: only README.md is required (pyproject readme + Dockerfile COPY)
+*.md
+!README.md
+
+# Orchestration files are not consumed by this Dockerfile
+docker-compose.yml
+Dockerfile
+.dockerignore

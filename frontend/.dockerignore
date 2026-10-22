@@ -1,0 +1,12 @@
+# Dependencies are installed inside the image from package.json + bun.lock.
+# bun.lock is REQUIRED by the build (bun install --frozen-lockfile): never ignore it.
+node_modules/
+dist/
+.astro/
+
+# Local secrets
+.env
+.env.*
+
+# Build noise
+*.log
