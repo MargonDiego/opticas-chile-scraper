@@ -89,10 +89,15 @@ class IPRateLimiter:
         # Only trust proxy-supplied headers when explicitly running behind a
         # trusted reverse proxy chain (Cloudflare -> Traefik -> uvicorn).
         # Header trust is NOT uniform behind such a chain:
-        # - CF-Connecting-IP is read first on the expectation that Cloudflare
-        #   overwrites it with the real visitor IP, which is what lets us treat
-        #   it as attacker-proof. That expectation is load-bearing and is
-        #   verified empirically after deploy (see below), not assumed silently.
+        # - CF-Connecting-IP is read first because Cloudflare owns that header
+        #   and refuses traffic that tries to supply it. Verified 2026-10-23
+        #   against this deployment: a request carrying a client-supplied
+        #   CF-Connecting-IP gets 403 from the Cloudflare edge with
+        #   cfOrigin duration 0, i.e. it never reaches this application, and
+        #   the header fingerprint (X-Frame-Options SAMEORIGIN, no
+        #   WWW-Authenticate) is Cloudflare's rather than ours. So the value
+        #   only ever arrives here set by Cloudflare, and rotating it cannot
+        #   mint fresh buckets.
         # - X-Forwarded-For is APPENDED to by each proxy, so its leftmost entry
         #   is whatever the original client sent and is therefore
         #   attacker-controlled here: production was measured with 25 requests
@@ -106,10 +111,18 @@ class IPRateLimiter:
         # separately because ipaddress accepts them with an arbitrarily long
         # scope suffix, which would otherwise slip past this check.
         #
-        # POST-DEPLOY CHECK (required): with TRUST_PROXY_HEADERS=true, rotating
-        # CF-Connecting-IP AND rotating X-Forwarded-For must BOTH return 429 at
-        # request 21. Rotating either without a 429 means Cloudflare preserves
-        # that header and this fix is not protecting anything.
+        # RESIDUAL RISK, still open: this protection is Cloudflare's, not ours.
+        # If anything can reach uvicorn without passing through Cloudflare --
+        # docker-compose publishes APP_PORT on the host, and that exposure has
+        # not been checked -- then a client can send any CF-Connecting-IP
+        # directly and mint buckets freely. Confirm the port is not reachable
+        # from the internet, or terminate only on Cloudflare's address ranges.
+        #
+        # Note on the fallback: forged X-Forwarded-For DOES pass the Cloudflare
+        # edge and reaches this application (measured: it returns our 401, not
+        # Cloudflare's 403). The leftmost entry is therefore still attacker
+        # controlled whenever CF-Connecting-IP is missing, which is why that
+        # branch is only appropriate for deployments without Cloudflare.
         if settings.TRUST_PROXY_HEADERS:
             candidates = [request.headers.get("CF-Connecting-IP")]
             forwarded = request.headers.get("X-Forwarded-For")
