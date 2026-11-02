@@ -99,13 +99,22 @@ export function ProductCard({ product, onViewHistory }: Props) {
   return (
     <article
       className={cn(
-        "flex flex-col overflow-hidden rounded-lg border border-border bg-card",
-        "transition-[border-color,box-shadow] duration-fast ease-out",
+        "group relative flex flex-col overflow-hidden rounded-xl border border-border bg-card",
+        "transition-all duration-fast ease-out",
         "hover-supported:hover:border-border-strong hover-supported:hover:shadow-overlay"
       )}
     >
-      {/* 1. Image well — white in both themes so transparent frame PNGs read clean. */}
-      <div className="m-3 flex aspect-[4/3] items-center justify-center rounded-md bg-white well-ring">
+      {/* 1. Image container */}
+      <div className="relative m-2 sm:m-3 flex aspect-[4/3] items-center justify-center rounded-lg bg-white well-ring overflow-hidden">
+        {/* Floating discount badge on image */}
+        {hasDiscount && (
+          <div className="absolute top-1.5 left-1.5 z-10">
+            <span className="rounded bg-success px-1.5 py-0.5 text-[10px] sm:text-xs font-bold tabular-nums text-white shadow-xs">
+              -{discountPercent}
+            </span>
+          </div>
+        )}
+
         {resolvedImgUrl && !imgError ? (
           <img
             src={resolvedImgUrl}
@@ -115,91 +124,87 @@ export function ProductCard({ product, onViewHistory }: Props) {
             onLoad={() => setImgLoaded(true)}
             onError={() => setImgError(true)}
             className={cn(
-              "h-full w-full object-contain p-4 transition-opacity duration-slow ease-out",
+              "h-full w-full object-contain p-2 sm:p-4 transition-transform duration-slow ease-out group-hover:scale-105",
               isOutOfStock && "grayscale opacity-60",
               !imgLoaded && "opacity-0"
             )}
           />
         ) : (
-          <div className="flex flex-col items-center justify-center gap-1.5 p-4 text-center">
+          <div className="flex flex-col items-center justify-center gap-1 p-2 text-center">
             <Glasses
               className="h-4 w-4 text-muted-foreground opacity-40"
               aria-hidden="true"
             />
-            <span className="text-body-sm text-on-white">{product.brand}</span>
+            <span className="text-[11px] text-muted-foreground truncate max-w-[120px]">{product.brand}</span>
           </div>
         )}
       </div>
 
       {/* 2. Content */}
-      <div className="flex flex-1 flex-col gap-3 px-4 pb-4">
-        {hasDiscount && (
-          <span className="w-fit rounded-sm bg-success-tint px-2 py-1 text-body-sm font-semibold tabular-nums text-success-foreground">
-            -{discountPercent}
-            <span className="sr-only"> de descuento</span>
-          </span>
-        )}
-
-        {/* Chain + category — icon and label, never a hue. */}
-        <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-1 flex-col gap-2 p-2.5 sm:px-4 sm:pb-4 sm:pt-1">
+        {/* Store badge & Category */}
+        <div className="flex items-center justify-between gap-1 text-[11px] sm:text-xs">
           <StoreBadge store={product.store} />
-          <span className="inline-flex shrink-0 items-center gap-1.5 text-body-sm text-muted-foreground">
-            <CategoryIcon className="h-3.5 w-3.5" aria-hidden="true" />
-            {formatCategoryLabel(product.category)}
+          <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground">
+            <CategoryIcon className="h-3 w-3" aria-hidden="true" />
+            <span className="hidden sm:inline">{formatCategoryLabel(product.category)}</span>
           </span>
         </div>
 
-        {/* Brand + model */}
+        {/* Brand + Model */}
         <div className="min-w-0">
-          <p className="text-body-sm text-muted-foreground">{product.brand}</p>
-          <h3 className="mt-0.5 line-clamp-2 text-title text-foreground">
+          <p className="text-[11px] sm:text-xs font-semibold uppercase tracking-wider text-muted-foreground truncate">
+            {product.brand}
+          </p>
+          <h3 className="mt-0.5 line-clamp-2 text-xs sm:text-sm font-medium text-foreground leading-snug min-h-[2rem]">
             {product.model_name}
           </h3>
         </div>
 
         {/* Price block */}
-        <div className="mt-auto space-y-1 pt-1">
-          <div className="flex flex-wrap items-baseline gap-2">
+        <div className="mt-auto space-y-0.5 pt-1">
+          <div className="flex flex-wrap items-baseline gap-1.5">
             {effectivePrice ? (
               <>
-                <span className="text-price tabular-nums text-foreground">
+                <span className="text-sm sm:text-base font-bold tabular-nums text-foreground">
                   {formatCLP(effectivePrice)}
                 </span>
                 {hasDiscount && (
-                  <span className="text-body-sm tabular-nums text-ink-subtle line-through">
+                  <span className="text-[10px] sm:text-xs tabular-nums text-muted-foreground line-through">
                     {formatCLP(product.current_price_normal)}
                   </span>
                 )}
               </>
             ) : (
-              <span className="text-body-sm text-muted-foreground">
+              <span className="text-xs text-muted-foreground">
                 Precio a consultar
               </span>
             )}
           </div>
 
           {hasDiscount && savingsAmount > 0 && (
-            <p className="text-body-sm font-semibold text-success-foreground">
-              Ahorrás {formatCLP(savingsAmount)}
+            <p className="text-[10px] sm:text-xs font-semibold text-success-foreground truncate">
+              Ahorras {formatCLP(savingsAmount)}
             </p>
           )}
 
           {isOutOfStock && (
-            <p className="text-body-sm text-muted-foreground">Sin stock</p>
+            <p className="text-[10px] sm:text-xs font-medium text-destructive">Sin stock</p>
           )}
         </div>
 
-        {/* 3. Actions — 44px tall, both of them. */}
-        <div className="grid grid-cols-2 gap-2">
+        {/* 3. Actions — Compact 2-column touch targets */}
+        <div className="grid grid-cols-2 gap-1.5 pt-1">
           <Button
             type="button"
             variant="secondary"
             size="default"
             onClick={() => onViewHistory(product.id)}
-            className="min-h-11 gap-1.5 px-3 pointer-fine:min-h-11"
+            className="h-9 sm:h-10 text-xs px-2 gap-1 rounded-md"
+            aria-label={`Ver historial de precios de ${product.model_name}`}
           >
-            <History className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>Historial</span>
+            <History className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span className="truncate">Historial</span>
           </Button>
 
           {isOutOfStock ? (
@@ -208,10 +213,9 @@ export function ProductCard({ product, onViewHistory }: Props) {
               variant="secondary"
               size="default"
               disabled
-              className="min-h-11 gap-1.5 px-3 pointer-fine:min-h-11"
+              className="h-9 sm:h-10 text-xs px-2 gap-1 rounded-md opacity-50"
             >
-              <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>Ver Tienda</span>
+              <span className="truncate">Agotado</span>
             </Button>
           ) : (
             <a
@@ -219,12 +223,12 @@ export function ProductCard({ product, onViewHistory }: Props) {
               target="_blank"
               rel="noopener noreferrer"
               className={cn(
-                buttonVariants({ variant: "secondary", size: "default" }),
-                "min-h-11 gap-1.5 px-3 pointer-fine:min-h-11"
+                buttonVariants({ variant: "default", size: "default" }),
+                "h-9 sm:h-10 text-xs px-2 gap-1 rounded-md justify-center"
               )}
             >
-              <span>Ver Tienda</span>
-              <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
+              <span className="truncate">Ir a tienda</span>
+              <ArrowUpRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             </a>
           )}
         </div>
@@ -235,32 +239,28 @@ export function ProductCard({ product, onViewHistory }: Props) {
 
 export function ProductCardSkeleton() {
   return (
-    <article className="flex flex-col overflow-hidden rounded-lg border border-border bg-card animate-pulse">
-      <div className="m-3 flex aspect-[4/3] items-center justify-center rounded-md bg-white well-ring">
-        <div className="h-10 w-24 rounded-md bg-muted" />
-      </div>
+    <article className="flex flex-col overflow-hidden rounded-xl border border-border bg-card animate-pulse">
+      <div className="m-2 sm:m-3 flex aspect-[4/3] items-center justify-center rounded-lg bg-muted/60" />
 
-      <div className="flex flex-1 flex-col gap-3 px-4 pb-4">
-        <div className="h-5 w-20 rounded-sm bg-muted" />
-
+      <div className="flex flex-1 flex-col gap-2 p-2.5 sm:px-4 sm:pb-4 sm:pt-1">
         <div className="flex items-center justify-between gap-2">
-          <div className="h-4 w-24 rounded-sm bg-muted/80" />
-          <div className="h-4 w-14 rounded-sm bg-muted/60" />
+          <div className="h-3 w-16 rounded-sm bg-muted/80" />
+          <div className="h-3 w-10 rounded-sm bg-muted/60" />
         </div>
 
-        <div className="space-y-1.5">
-          <div className="h-3.5 w-16 rounded-sm bg-muted/70" />
-          <div className="h-4 w-full rounded-sm bg-muted/90" />
+        <div className="space-y-1">
+          <div className="h-2.5 w-12 rounded-sm bg-muted/70" />
+          <div className="h-3.5 w-full rounded-sm bg-muted/90" />
         </div>
 
-        <div className="mt-auto space-y-2 pt-1">
-          <div className="h-6 w-28 rounded-sm bg-muted/90" />
-          <div className="h-3.5 w-24 rounded-sm bg-muted/60" />
+        <div className="mt-auto space-y-1 pt-1">
+          <div className="h-4 w-20 rounded-sm bg-muted/90" />
+          <div className="h-2.5 w-16 rounded-sm bg-muted/60" />
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
-          <div className="h-11 rounded-md bg-muted/60" />
-          <div className="h-11 rounded-md bg-muted/60" />
+        <div className="grid grid-cols-2 gap-1.5 pt-1">
+          <div className="h-9 sm:h-10 rounded-md bg-muted/60" />
+          <div className="h-9 sm:h-10 rounded-md bg-muted/60" />
         </div>
       </div>
     </article>

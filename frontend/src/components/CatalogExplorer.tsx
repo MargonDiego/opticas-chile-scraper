@@ -567,7 +567,7 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
         <div
           role="group"
           aria-label="Categorías de productos"
-          className="flex flex-wrap gap-2"
+          className="flex overflow-x-auto no-scrollbar scroll-smooth gap-2 py-1 -mx-3 px-3 sm:mx-0 sm:px-0 sm:flex-wrap"
         >
           {CATEGORIES.map((category) => {
             const Icon = category.icon;
@@ -578,10 +578,57 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
                 type="button"
                 aria-pressed={isActive}
                 onClick={() => setSelectedCategory(category.id)}
-                className={chipClass(isActive)}
+                className={cn(chipClass(isActive), "shrink-0")}
               >
                 <Icon className="h-4 w-4" aria-hidden="true" />
                 <span className="text-label">{category.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Quick horizontal filter chips for deals and stores */}
+        <div
+          role="group"
+          aria-label="Filtros rápidos"
+          className="flex overflow-x-auto no-scrollbar scroll-smooth gap-1.5 py-0.5 -mx-3 px-3 sm:mx-0 sm:px-0 sm:flex-wrap items-center"
+        >
+          {DEAL_FILTERS.slice(1).map((deal) => {
+            const isDealActive = dealFilter === deal.id;
+            return (
+              <button
+                key={deal.id}
+                type="button"
+                aria-pressed={isDealActive}
+                onClick={() => setDealFilter(isDealActive ? "all" : deal.id)}
+                className={cn(
+                  "h-8 px-3 rounded-full text-xs font-medium shrink-0 border transition-colors",
+                  isDealActive
+                    ? "bg-accent border-primary/40 text-accent-foreground font-semibold"
+                    : "bg-card border-border text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {deal.label}
+              </button>
+            );
+          })}
+          <div className="h-4 w-px bg-border shrink-0 my-auto" aria-hidden="true" />
+          {STORES.slice(1).map((store) => {
+            const isStoreActive = selectedStore === store.id;
+            return (
+              <button
+                key={store.id}
+                type="button"
+                aria-pressed={isStoreActive}
+                onClick={() => setSelectedStore(isStoreActive ? "all" : store.id)}
+                className={cn(
+                  "h-8 px-3 rounded-full text-xs font-medium shrink-0 border transition-colors",
+                  isStoreActive
+                    ? "bg-accent border-primary/40 text-accent-foreground font-semibold"
+                    : "bg-card border-border text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {store.label}
               </button>
             );
           })}
@@ -590,20 +637,18 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
 
       {/* 2. Results toolbar + results */}
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Row A — the real count, as plain text. */}
-          <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:flex-1">
-            <p className="text-body-sm text-muted-foreground">
+        <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+          {/* Row A — count & refresh */}
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs sm:text-body-sm text-muted-foreground">
               {loading ? (
-                "Consultando catálogo en vivo..."
+                "Consultando catálogo..."
               ) : (
                 <>
-                  Mostrando{" "}
-                  <span className="tabular-nums">{products.length}</span> de{" "}
-                  <span className="tabular-nums">
+                  <span className="font-semibold text-foreground tabular-nums">
                     {totalCount.toLocaleString("es-CL")}
                   </span>{" "}
-                  productos
+                  modelos encontrados
                 </>
               )}
             </p>
@@ -612,43 +657,39 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
               variant="ghost"
               onClick={handleRefresh}
               aria-label="Actualizar catálogo"
-              className={cn(CONTROL_HEIGHT, "w-11 shrink-0 px-0")}
+              className="h-8 w-8 sm:h-11 sm:w-11 shrink-0 p-0 text-muted-foreground hover:text-foreground"
             >
               <RefreshCw
-                className={cn("h-4 w-4", loading && "animate-spin")}
+                className={cn("h-3.5 w-3.5 sm:h-4 sm:w-4", loading && "animate-spin")}
                 aria-hidden="true"
               />
             </Button>
           </div>
 
-          {/* Row B — in-stock toggle + sort. */}
-          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          {/* Row B — stock toggle + sort */}
+          <div className="flex items-center gap-2">
             <button
               type="button"
               aria-pressed={onlyInStock}
               onClick={() => setOnlyInStock((value) => !value)}
               className={cn(
-                CONTROL_HEIGHT,
-                "inline-flex items-center gap-2 rounded-md border px-3",
-                "transition-colors duration-fast ease-out",
+                "h-9 sm:h-11 inline-flex items-center gap-1.5 rounded-md border px-2.5 sm:px-3 text-xs sm:text-label",
+                "transition-colors duration-fast ease-out shrink-0",
                 focusRing,
                 onlyInStock
-                  ? "border-primary/40 bg-accent text-accent-foreground"
+                  ? "border-primary/40 bg-accent text-accent-foreground font-semibold"
                   : "border-border bg-card text-muted-foreground hover:border-border-strong hover:text-foreground"
               )}
             >
-              <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-              <span className="text-label">Solo en stock</span>
+              <CheckCircle2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden="true" />
+              <span>En stock</span>
             </button>
 
             <Select
               value={sortBy}
               onChange={handleSortChange}
               aria-label="Ordenar resultados"
-              className={cn(
-                CONTROL_HEIGHT,
-                "w-auto min-w-0 flex-1 sm:flex-none sm:min-w-[12rem]"
-              )}
+              className="h-9 sm:h-11 text-xs sm:text-sm min-w-0 flex-1 sm:w-auto sm:min-w-[12rem]"
             >
               {SORT_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -667,7 +708,7 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
 
           <div className="min-w-0 flex-1">
             {loading ? (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3 xl:grid-cols-4">
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-2 sm:gap-4 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4">
                 {[...Array(8)].map((_, i) => (
                   <ProductCardSkeleton key={i} />
                 ))}
@@ -701,7 +742,7 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
               <div className="space-y-8">
                 {/* The results grid keeps the page outline intact: h1 → h2 → h3. */}
                 <h2 className="sr-only">Resultados</h2>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3 xl:grid-cols-4">
+                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-2 sm:gap-4 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4">
                   {products.map((p) => (
                     <ProductCard
                       key={p.id}
@@ -804,8 +845,18 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
               </button>
             </div>
           </div>
-          <div className="safe-bottom min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
             {filterSheetOpen ? <FilterPanel {...filterPanelProps} /> : null}
+          </div>
+          <div className="shrink-0 border-t border-border bg-card p-3 safe-bottom">
+            <Button
+              type="button"
+              variant="default"
+              onClick={() => setFilterSheetOpen(false)}
+              className="w-full h-11 text-sm font-semibold rounded-lg"
+            >
+              Ver {totalCount.toLocaleString("es-CL")} resultados {activeFilterCount > 0 && `(${activeFilterCount} filtros)`}
+            </Button>
           </div>
         </div>
       </dialog>

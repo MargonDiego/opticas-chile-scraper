@@ -335,45 +335,45 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
             className="space-y-6"
           >
             {/* One data readout, three figures, hairline separated. */}
-            <div className="grid grid-cols-1 gap-y-3 sm:grid-cols-3">
+            <div className="grid grid-cols-3 gap-2 py-1 sm:gap-4">
               <div className="min-w-0 sm:pr-4">
-                <p className="text-body-sm text-muted-foreground">Mínimo histórico</p>
-                <p className="text-price tabular-nums text-foreground">
+                <p className="text-[11px] sm:text-body-sm text-muted-foreground truncate">Mínimo</p>
+                <p className="text-xs sm:text-price font-bold tabular-nums text-foreground truncate">
                   {minHistoricalPrice > 0 ? formatCLP(minHistoricalPrice) : "Sin datos"}
                 </p>
                 {isCurrentAtAllTimeLow && (
-                  <span className="mt-1 inline-flex items-center gap-1 rounded-sm bg-success-tint px-2 py-1 text-body-sm font-semibold text-success-foreground">
-                    <TrendingDown className="h-3.5 w-3.5" aria-hidden="true" />
-                    Mejor precio hoy
+                  <span className="mt-0.5 inline-flex items-center gap-1 rounded bg-success-tint px-1.5 py-0.5 text-[10px] sm:text-xs font-semibold text-success-foreground truncate">
+                    <TrendingDown className="h-3 w-3 shrink-0" aria-hidden="true" />
+                    Mejor precio
                   </span>
                 )}
               </div>
 
-              <div className="min-w-0 sm:border-l sm:border-border sm:px-4">
-                <p className="text-body-sm text-muted-foreground">Máximo registrado</p>
-                <p className="text-price tabular-nums text-foreground">
+              <div className="min-w-0 border-l border-border pl-2 sm:px-4">
+                <p className="text-[11px] sm:text-body-sm text-muted-foreground truncate">Máximo</p>
+                <p className="text-xs sm:text-price font-bold tabular-nums text-foreground truncate">
                   {maxHistoricalPrice > 0 ? formatCLP(maxHistoricalPrice) : "Sin datos"}
                 </p>
-                <p className="text-body-sm tabular-nums text-muted-foreground">
-                  {chartPoints.length} mediciones
+                <p className="text-[10px] sm:text-body-sm tabular-nums text-muted-foreground truncate">
+                  {chartPoints.length} registros
                 </p>
               </div>
 
-              <div className="min-w-0 sm:border-l sm:border-border sm:pl-4">
-                <p className="text-body-sm text-muted-foreground">Disponibilidad</p>
+              <div className="min-w-0 border-l border-border pl-2 sm:pl-4">
+                <p className="text-[11px] sm:text-body-sm text-muted-foreground truncate">Stock</p>
                 <p
-                  className={`inline-flex items-center gap-1.5 text-price tabular-nums ${
+                  className={`inline-flex items-center gap-1 text-xs sm:text-price font-bold tabular-nums truncate ${
                     isInStock ? "text-success-foreground" : "text-destructive"
                   }`}
                 >
                   {isInStock ? (
-                    <Check className="h-4 w-4" aria-hidden="true" />
+                    <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                   ) : (
-                    <X className="h-4 w-4" aria-hidden="true" />
+                    <X className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                   )}
                   {isInStock ? "En stock" : "Agotado"}
                 </p>
-                <p className="text-body-sm text-muted-foreground">
+                <p className="text-[10px] sm:text-body-sm text-muted-foreground truncate">
                   {storeLabel(product.store)}
                 </p>
               </div>
