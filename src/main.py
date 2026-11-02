@@ -11,10 +11,10 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from sqlalchemy import JSON, func, or_, text, update
+from sqlalchemy import JSON, case, func, or_, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import noload, selectinload
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.config import settings
@@ -58,6 +58,7 @@ from src.services.ollama import (
 )
 from src.services.product_matcher import extract_canonical_key
 from src.services.search import (
+    OPTICAL_BRAND_ALIASES,
     apply_deal_filter,
     cosine_distance_to_similarity,
     expand_and_correct_query,
@@ -297,67 +298,109 @@ async def get_products(
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_session),
 ):
-    all_products, _ = await get_cached_catalog(session)
+    conditions = []
 
-    filtered: List[tuple[float, ProductRead]] = []
-    brand_lower = brand.lower() if brand else None
+    if store and store != "all":
+        conditions.append(Product.store == store)
 
-    search_tokens = []
+    if category and category != "all":
+        conditions.append(Product.category == category)
+
+    if brand and brand.strip():
+        conditions.append(func.lower(Product.brand).contains(brand.strip().lower()))
+
+    if in_stock is True:
+        conditions.append(Product.current_in_stock.is_(True))
+
+    effective_price = func.coalesce(Product.current_price_discount, Product.current_price_normal, 0)
+    if min_price is not None:
+        conditions.append(effective_price >= min_price)
+    if max_price is not None:
+        conditions.append(effective_price <= max_price)
+
+    if deal == "disc-40":
+        conditions.append(Product.current_price_discount.isnot(None))
+        conditions.append(Product.current_price_normal.isnot(None))
+        conditions.append(Product.current_price_normal > 0)
+        conditions.append(
+            ((Product.current_price_normal - Product.current_price_discount) * 100.0 / Product.current_price_normal) >= 40.0
+        )
+    elif deal == "disc-20":
+        conditions.append(Product.current_price_discount.isnot(None))
+        conditions.append(Product.current_price_normal.isnot(None))
+        conditions.append(Product.current_price_normal > 0)
+        conditions.append(
+            ((Product.current_price_normal - Product.current_price_discount) * 100.0 / Product.current_price_normal) >= 20.0
+        )
+    elif deal == "under-50k":
+        conditions.append(effective_price > 0)
+        conditions.append(effective_price < 50000)
+    elif deal == "under-100k":
+        conditions.append(effective_price > 0)
+        conditions.append(effective_price < 100000)
+
     if search and search.strip():
-        known_brands = list({p.brand for p in all_products if p.brand})
-        _, search_tokens = expand_and_correct_query(search.strip(), known_brands)
+        search_tokens = [t.strip().lower() for t in search.strip().split() if t.strip()]
+        expanded_tokens = set(search_tokens)
+        for t in search_tokens:
+            if t in OPTICAL_BRAND_ALIASES:
+                expanded_tokens.add(OPTICAL_BRAND_ALIASES[t])
 
-    for mapped in all_products:
-        if store and store != "all" and mapped.store != store:
-            continue
-        if category and category != "all" and mapped.category != category:
-            continue
-        if brand_lower and (not mapped.brand or brand_lower not in mapped.brand.lower()):
-            continue
+        token_clauses = []
+        for tok in expanded_tokens:
+            tok_pat = f"%{tok}%"
+            token_clauses.append(
+                or_(
+                    func.lower(Product.brand).like(tok_pat),
+                    func.lower(Product.model_name).like(tok_pat),
+                    func.lower(Product.category).like(tok_pat),
+                    func.lower(Product.description).like(tok_pat),
+                )
+            )
+        if token_clauses:
+            conditions.append(or_(*token_clauses))
 
-        score = lexical_score(search_tokens, mapped)
-        if search_tokens and score <= 0.0:
-            continue
-
-        # Stock filter
-        if in_stock is True and mapped.current_in_stock is False:
-            continue
-
-        price = mapped.current_price_discount or mapped.current_price_normal or 0
-
-        # Min / Max price filter
-        if min_price and price < min_price:
-            continue
-        if max_price and price > max_price:
-            continue
-
-        if not apply_deal_filter(deal, mapped, price):
-            continue
-
-        filtered.append((score, mapped))
-
-    # Sorting
-    if search_tokens and sort_by == "price-asc":
-        # When user searches, prioritize relevance score first, then price
-        filtered.sort(key=lambda item: (-item[0], item[1].current_price_discount or item[1].current_price_normal or 99999999))
-    elif sort_by == "price-asc":
-        filtered.sort(key=lambda item: (item[1].current_price_discount or item[1].current_price_normal or 99999999))
+    order_clauses = []
+    if sort_by == "price-asc":
+        effective_sort_price = func.coalesce(Product.current_price_discount, Product.current_price_normal, 99999999)
+        order_clauses.append(effective_sort_price.asc())
     elif sort_by == "price-desc":
-        filtered.sort(key=lambda item: (item[1].current_price_discount or item[1].current_price_normal or 0), reverse=True)
+        effective_sort_price = func.coalesce(Product.current_price_discount, Product.current_price_normal, 0)
+        order_clauses.append(effective_sort_price.desc())
     elif sort_by == "discount":
-        def get_discount_pct(p: ProductRead) -> float:
-            if p.current_price_discount and p.current_price_normal and p.current_price_discount < p.current_price_normal:
-                return (p.current_price_normal - p.current_price_discount) / p.current_price_normal
-            return 0.0
-        filtered.sort(key=lambda item: get_discount_pct(item[1]), reverse=True)
+        discount_expr = case(
+            (
+                (Product.current_price_discount.isnot(None)) & (Product.current_price_normal > 0),
+                (Product.current_price_normal - Product.current_price_discount) * 1.0 / Product.current_price_normal
+            ),
+            else_=0.0
+        )
+        order_clauses.append(discount_expr.desc())
     elif sort_by == "recent":
-        filtered.sort(key=lambda item: item[1].updated_at, reverse=True)
+        order_clauses.append(Product.updated_at.desc())
+    else:
+        order_clauses.append(Product.id.asc())
 
-    result_products = [item[1] for item in filtered]
-    total_count = len(result_products)
+    count_stmt = select(func.count()).select_from(Product)
+    if conditions:
+        count_stmt = count_stmt.where(*conditions)
+    total_count = (await session.execute(count_stmt)).scalar() or 0
     response.headers["X-Total-Count"] = str(total_count)
 
-    return result_products[offset : offset + limit]
+    query = (
+        select(Product)
+        .options(noload(Product.price_snapshots))
+        .offset(offset)
+        .limit(limit)
+    )
+    if conditions:
+        query = query.where(*conditions)
+    if order_clauses:
+        query = query.order_by(*order_clauses)
+
+    rows = (await session.execute(query)).scalars().all()
+    return [map_product_read(p) for p in rows]
+
 
 
 @app.get("/api/products/{product_id}", response_model=ProductDetailRead, tags=["Products"], dependencies=[Depends(get_api_key)])

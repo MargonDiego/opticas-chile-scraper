@@ -61,6 +61,10 @@ class Product(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
+    current_price_normal: Optional[int] = Field(default=None, index=True)
+    current_price_discount: Optional[int] = Field(default=None, index=True)
+    current_in_stock: Optional[bool] = Field(default=True, index=True)
+
     price_snapshots: List["PriceSnapshot"] = Relationship(
         back_populates="product",
         sa_relationship_kwargs={"cascade": "all, delete-orphan", "lazy": "selectin"},

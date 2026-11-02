@@ -12,10 +12,21 @@ logger = logging.getLogger(__name__)
 if settings.DATABASE_URL.startswith("sqlite"):
     os.makedirs("data", exist_ok=True)
 
+pool_kwargs = {}
+if not settings.DATABASE_URL.startswith("sqlite"):
+    pool_kwargs = {
+        "pool_size": 20,
+        "max_overflow": 10,
+        "pool_timeout": 30,
+        "pool_recycle": 1800,
+        "pool_pre_ping": True,
+    }
+
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,
     future=True,
+    **pool_kwargs,
 )
 
 async_session_factory = sessionmaker(
@@ -46,6 +57,66 @@ async def init_db() -> None:
             logger.info("Composite index ix_price_snapshots_product_scraped ensured.")
         except Exception as e:
             logger.warning(f"Could not create composite index: {e}")
+
+        # Ensure current_price_normal, current_price_discount, current_in_stock columns exist and backfill
+        try:
+            if settings.DATABASE_URL.startswith("postgresql"):
+                await conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS current_price_normal INTEGER;"))
+                await conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS current_price_discount INTEGER;"))
+                await conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS current_in_stock BOOLEAN DEFAULT TRUE;"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_products_current_price_normal ON products (current_price_normal);"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_products_current_price_discount ON products (current_price_discount);"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_products_current_in_stock ON products (current_in_stock);"))
+
+                # Backfill from latest snapshot for existing rows
+                await conn.execute(text("""
+                    UPDATE products p
+                    SET current_price_normal = s.price_normal,
+                        current_price_discount = s.price_discount,
+                        current_in_stock = s.is_in_stock
+                    FROM (
+                        SELECT DISTINCT ON (product_id) product_id, price_normal, price_discount, is_in_stock
+                        FROM price_snapshots
+                        ORDER BY product_id, scraped_at DESC
+                    ) s
+                    WHERE p.id = s.product_id
+                      AND p.current_price_normal IS NULL;
+                """))
+                logger.info("PostgreSQL products current price migration and backfill completed.")
+            else:
+                # SQLite schema check and backfill
+                pragma_res = await conn.execute(text("PRAGMA table_info(products);"))
+                cols = {row[1] for row in pragma_res.fetchall()}
+                if "current_price_normal" not in cols:
+                    await conn.execute(text("ALTER TABLE products ADD COLUMN current_price_normal INTEGER;"))
+                if "current_price_discount" not in cols:
+                    await conn.execute(text("ALTER TABLE products ADD COLUMN current_price_discount INTEGER;"))
+                if "current_in_stock" not in cols:
+                    await conn.execute(text("ALTER TABLE products ADD COLUMN current_in_stock BOOLEAN DEFAULT 1;"))
+
+                await conn.execute(text("""
+                    UPDATE products
+                    SET current_price_normal = (
+                        SELECT s.price_normal FROM price_snapshots s
+                        WHERE s.product_id = products.id
+                        ORDER BY s.scraped_at DESC LIMIT 1
+                    ),
+                    current_price_discount = (
+                        SELECT s.price_discount FROM price_snapshots s
+                        WHERE s.product_id = products.id
+                        ORDER BY s.scraped_at DESC LIMIT 1
+                    ),
+                    current_in_stock = (
+                        SELECT s.is_in_stock FROM price_snapshots s
+                        WHERE s.product_id = products.id
+                        ORDER BY s.scraped_at DESC LIMIT 1
+                    )
+                    WHERE current_price_normal IS NULL
+                      AND EXISTS (SELECT 1 FROM price_snapshots WHERE product_id = products.id);
+                """))
+                logger.info("SQLite products current price migration and backfill completed.")
+        except Exception as e:
+            logger.warning(f"Could not apply current_price columns migration/backfill: {e}")
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

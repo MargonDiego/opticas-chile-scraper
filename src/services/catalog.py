@@ -1,3 +1,4 @@
+import asyncio
 import time
 from typing import List
 
@@ -14,6 +15,7 @@ _CATALOG_CACHE = {
     "timestamp": 0.0,
     "ttl_seconds": 3600.0,  # 1 hour cache; invalidated explicitly after scrape runs
 }
+_CACHE_LOCK = asyncio.Lock()
 
 
 def invalidate_catalog_cache() -> None:
@@ -29,9 +31,13 @@ def map_product_read(prod: Product) -> ProductRead:
         sorted_snaps = sorted(prod.price_snapshots, key=lambda s: s.scraped_at, reverse=True)
         latest = sorted_snaps[0]
 
+    raw_normal = prod.current_price_normal if prod.current_price_normal is not None else (latest.price_normal if latest else None)
+    raw_discount = prod.current_price_discount if prod.current_price_discount is not None else (latest.price_discount if latest else None)
+    in_stock = prod.current_in_stock if prod.current_in_stock is not None else (latest.is_in_stock if latest else None)
+
     # Sanitize unrealistic prices (< 1,000 CLP are placeholders, test items or anomalies)
-    price_normal = latest.price_normal if (latest and latest.price_normal and latest.price_normal >= 1000) else None
-    price_discount = latest.price_discount if (latest and latest.price_discount and latest.price_discount >= 1000) else None
+    price_normal = raw_normal if (raw_normal and raw_normal >= 1000) else None
+    price_discount = raw_discount if (raw_discount and raw_discount >= 1000) else None
 
     return ProductRead(
         id=prod.id,
@@ -47,7 +53,7 @@ def map_product_read(prod: Product) -> ProductRead:
         updated_at=prod.updated_at,
         current_price_normal=price_normal,
         current_price_discount=price_discount,
-        current_in_stock=latest.is_in_stock if latest else None,
+        current_in_stock=in_stock,
     )
 
 
@@ -57,36 +63,36 @@ async def get_cached_catalog(session: AsyncSession) -> tuple[List[ProductRead], 
     if _CATALOG_CACHE["products"] and (now - _CATALOG_CACHE["timestamp"]) < _CATALOG_CACHE["ttl_seconds"]:
         return _CATALOG_CACHE["products"], _CATALOG_CACHE["stats"]
 
-    # Only the latest snapshot per product is needed here, but
-    # Product.price_snapshots defaults to eager-loading (lazy=selectin), so a
-    # plain select(Product) would pull every historical row for all ~10k
-    # products just to keep the newest one. Rank snapshots per product with a
-    # window function and join in only rank #1, instead.
-    latest_rank = (
-        select(
-            PriceSnapshot.product_id,
-            PriceSnapshot.price_normal,
-            PriceSnapshot.price_discount,
-            PriceSnapshot.is_in_stock,
-            func.row_number()
-            .over(partition_by=PriceSnapshot.product_id, order_by=PriceSnapshot.scraped_at.desc())
-            .label("rn"),
-        )
-    ).subquery()
-    latest_snap = select(latest_rank).where(latest_rank.c.rn == 1).subquery()
+    async with _CACHE_LOCK:
+        # Recheck after acquiring lock in case another task populated it
+        if _CATALOG_CACHE["products"] and (now - _CATALOG_CACHE["timestamp"]) < _CATALOG_CACHE["ttl_seconds"]:
+            return _CATALOG_CACHE["products"], _CATALOG_CACHE["stats"]
 
-    stmt = (
-        select(
-            Product,
-            latest_snap.c.price_normal,
-            latest_snap.c.price_discount,
-            latest_snap.c.is_in_stock,
+        latest_rank = (
+            select(
+                PriceSnapshot.product_id,
+                PriceSnapshot.price_normal,
+                PriceSnapshot.price_discount,
+                PriceSnapshot.is_in_stock,
+                func.row_number()
+                .over(partition_by=PriceSnapshot.product_id, order_by=PriceSnapshot.scraped_at.desc())
+                .label("rn"),
+            )
+        ).subquery()
+        latest_snap = select(latest_rank).where(latest_rank.c.rn == 1).subquery()
+
+        stmt = (
+            select(
+                Product,
+                func.coalesce(Product.current_price_normal, latest_snap.c.price_normal),
+                func.coalesce(Product.current_price_discount, latest_snap.c.price_discount),
+                func.coalesce(Product.current_in_stock, latest_snap.c.is_in_stock),
+            )
+            .outerjoin(latest_snap, Product.id == latest_snap.c.product_id)
+            .options(noload(Product.price_snapshots))
         )
-        .outerjoin(latest_snap, Product.id == latest_snap.c.product_id)
-        .options(noload(Product.price_snapshots))
-    )
-    prod_res = await session.execute(stmt)
-    rows = prod_res.all()
+        prod_res = await session.execute(stmt)
+        rows = prod_res.all()
 
     mapped_list: List[ProductRead] = []
     by_store = {}

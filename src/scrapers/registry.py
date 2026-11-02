@@ -111,6 +111,9 @@ async def execute_scrape_for_store(store: str, max_pages: Optional[int] = None) 
                     existing_prod.description = effective_description
                     if embedding:
                         existing_prod.embedding = embedding
+                    existing_prod.current_price_normal = item.price_normal
+                    existing_prod.current_price_discount = item.price_discount
+                    existing_prod.current_in_stock = item.is_in_stock
                     existing_prod.updated_at = now
                     product_id = existing_prod.id
                     items_updated += 1
@@ -126,6 +129,9 @@ async def execute_scrape_for_store(store: str, max_pages: Optional[int] = None) 
                         image_url=item.image_url,
                         description=effective_description,
                         embedding=embedding,
+                        current_price_normal=item.price_normal,
+                        current_price_discount=item.price_discount,
+                        current_in_stock=item.is_in_stock,
                         created_at=now,
                         updated_at=now,
                     )
