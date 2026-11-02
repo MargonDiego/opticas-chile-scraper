@@ -362,10 +362,30 @@ async def get_products(
 
     order_clauses = []
     if sort_by == "price-asc":
-        effective_sort_price = func.coalesce(Product.current_price_discount, Product.current_price_normal, 99999999)
+        effective_sort_price = case(
+            (
+                (Product.current_price_discount.isnot(None)) & (Product.current_price_discount > 0),
+                Product.current_price_discount
+            ),
+            (
+                (Product.current_price_normal.isnot(None)) & (Product.current_price_normal > 0),
+                Product.current_price_normal
+            ),
+            else_=99999999
+        )
         order_clauses.append(effective_sort_price.asc())
     elif sort_by == "price-desc":
-        effective_sort_price = func.coalesce(Product.current_price_discount, Product.current_price_normal, 0)
+        effective_sort_price = case(
+            (
+                (Product.current_price_discount.isnot(None)) & (Product.current_price_discount > 0),
+                Product.current_price_discount
+            ),
+            (
+                (Product.current_price_normal.isnot(None)) & (Product.current_price_normal > 0),
+                Product.current_price_normal
+            ),
+            else_=0
+        )
         order_clauses.append(effective_sort_price.desc())
     elif sort_by == "discount":
         discount_expr = case(

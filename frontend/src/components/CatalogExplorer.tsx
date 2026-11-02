@@ -752,10 +752,10 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
                   ))}
                 </div>
 
-                {/* Infinite Scroll Sentinel & Load More Status */}
+                {/* Infinite Scroll Sentinel & Load More Status (with extra mobile bottom padding so floating chat button never overlaps) */}
                 <div
                   ref={sentinelRef}
-                  className="flex flex-col items-center justify-center gap-3 pt-2 pb-8"
+                  className="flex flex-col items-center justify-center gap-3 pt-2 pb-24 sm:pb-12"
                 >
                   {products.length < totalCount ? (
                     <Button
