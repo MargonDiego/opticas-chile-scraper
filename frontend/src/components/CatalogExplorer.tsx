@@ -602,7 +602,7 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
                 aria-pressed={isDealActive}
                 onClick={() => setDealFilter(isDealActive ? "all" : deal.id)}
                 className={cn(
-                  "h-8 px-3 rounded-full text-xs font-medium shrink-0 border transition-colors",
+                  "h-11 pointer-fine:h-8 px-3 rounded-full text-xs font-medium shrink-0 border transition-colors",
                   isDealActive
                     ? "bg-accent border-primary/40 text-accent-foreground font-semibold"
                     : "bg-card border-border text-muted-foreground hover:text-foreground"
@@ -622,7 +622,7 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
                 aria-pressed={isStoreActive}
                 onClick={() => setSelectedStore(isStoreActive ? "all" : store.id)}
                 className={cn(
-                  "h-8 px-3 rounded-full text-xs font-medium shrink-0 border transition-colors",
+                  "h-11 pointer-fine:h-8 px-3 rounded-full text-xs font-medium shrink-0 border transition-colors",
                   isStoreActive
                     ? "bg-accent border-primary/40 text-accent-foreground font-semibold"
                     : "bg-card border-border text-muted-foreground hover:text-foreground"
@@ -672,7 +672,7 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
               variant="ghost"
               onClick={handleRefresh}
               aria-label="Actualizar catálogo"
-              className="h-8 w-8 sm:h-11 sm:w-11 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+              className="h-11 w-11 pointer-fine:h-9 pointer-fine:w-9 shrink-0 p-0 text-muted-foreground hover:text-foreground"
             >
               <RefreshCw
                 className={cn("h-3.5 w-3.5 sm:h-4 sm:w-4", loading && "animate-spin")}

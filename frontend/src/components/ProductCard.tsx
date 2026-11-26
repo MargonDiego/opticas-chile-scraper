@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { StoreBadge } from "./StoreBadge";
-import { cn, formatCLP, formatPriceFreshness } from "@/lib/utils";
+import { cn, focusRing, formatCLP, formatPriceFreshness } from "@/lib/utils";
 import { History, Glasses, Sun, Eye, ArrowUpRight } from "lucide-react";
 import { Button, buttonVariants } from "./ui/button";
 
@@ -126,7 +126,11 @@ export function ProductCard({ product, onViewHistory }: Props) {
             onViewHistory(product.id);
           }}
           aria-label={`Ver historial de precios de ${product.model_name}`}
-          className="absolute top-2 right-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 hover:bg-black/80 text-white transition-colors shadow-xs"
+          className={cn(
+            "absolute top-2 right-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 hover:bg-black/80 text-white transition-colors shadow-xs",
+            "after:absolute after:-inset-2 after:content-['']",
+            focusRing
+          )}
         >
           <History className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
@@ -172,8 +176,20 @@ export function ProductCard({ product, onViewHistory }: Props) {
           <p className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-muted-foreground truncate">
             {product.brand}
           </p>
-          <h3 className="mt-0.5 line-clamp-2 text-xs sm:text-sm font-semibold text-foreground leading-snug min-h-[2rem]">
-            {product.model_name}
+          <h3 className="mt-0.5 text-xs sm:text-sm font-semibold text-foreground leading-snug min-h-[2rem]">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onViewHistory(product.id);
+              }}
+              className={cn(
+                "line-clamp-2 text-left transition-colors hover:text-primary rounded-sm",
+                focusRing
+              )}
+            >
+              {product.model_name}
+            </button>
           </h3>
         </div>
 

@@ -302,13 +302,15 @@
    ========================================================================== */
 
 @media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto !important;
+  }
+
   *,
   ::before,
   ::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
+    transition-property: color, background-color, border-color, opacity !important;
+    transition-duration: 100ms !important;
   }
 
   .animate-spin,
