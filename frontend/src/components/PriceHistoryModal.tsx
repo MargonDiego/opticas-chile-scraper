@@ -395,23 +395,23 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
 
             {/* The series. Graphical only — every label lives in HTML. */}
             <div className="rounded-lg border border-border bg-surface-sunken p-4">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-label text-muted-foreground">Serie de precios</h3>
                 {hoveredPoint ? (
-                  <p className="text-body-sm">
-                    <span className="text-muted-foreground">{hoveredPoint.dateStr}</span>
-                    <span className="ml-2 font-semibold tabular-nums text-foreground">
+                  <p className="inline-flex items-center gap-1.5 rounded-sm bg-accent px-2 py-0.5 text-xs sm:text-body-sm">
+                    <span className="font-medium text-accent-foreground">{hoveredPoint.dateStr}</span>
+                    <span className="font-bold tabular-nums text-foreground">
                       {formatCLP(hoveredPoint.effectivePrice)}
                     </span>
                     {hoveredPoint.discountPct ? (
-                      <span className="ml-1.5 tabular-nums text-success-foreground">
+                      <span className="tabular-nums font-semibold text-success-foreground">
                         -{hoveredPoint.discountPct}%
                       </span>
                     ) : null}
                   </p>
                 ) : (
-                  <p className="text-body-sm text-muted-foreground">
-                    Toca la gráfica para ver cada medición
+                  <p className="text-xs sm:text-body-sm text-muted-foreground">
+                    Toca la gráfica para ver cada día
                   </p>
                 )}
               </div>
@@ -834,78 +834,184 @@ function PriceSvgChart({
     }
   };
 
+  const handleKeyDown = (event: React.KeyboardEvent<SVGSVGElement>) => {
+    if (points.length === 0) return;
+    const currentIndex = activePoint ? points.indexOf(activePoint) : points.length - 1;
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      onPointChange(points[Math.max(0, currentIndex - 1)]);
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      onPointChange(points[Math.min(points.length - 1, currentIndex + 1)]);
+    } else if (event.key === "Escape" && activePoint) {
+      event.stopPropagation();
+      onPointChange(null);
+    }
+  };
+
+  // Pick up to 4 evenly-spaced day labels along the X-axis.
+  const tickIndices: number[] = [];
+  if (points.length === 1) {
+    tickIndices.push(0);
+  } else if (points.length <= 4) {
+    for (let i = 0; i < points.length; i++) tickIndices.push(i);
+  } else {
+    const steps = 3;
+    for (let s = 0; s <= steps; s++) {
+      tickIndices.push(Math.round((s / steps) * (points.length - 1)));
+    }
+  }
+  const uniqueTickIndices = Array.from(new Set(tickIndices));
+
+  const formatAxisDay = (date: Date) =>
+    date.toLocaleDateString("es-CL", { day: "numeric", month: "short" });
+
   const ariaLabel = `Serie de precios de ${modelName} entre ${
     points[0].dateStr
   } y ${points[points.length - 1].dateStr}, de ${formatCLP(minP)} a ${formatCLP(maxP)}.`;
 
   return (
-    <div
-      ref={wrapRef}
-      className="aspect-[4/3] w-full sm:aspect-[21/9]"
-    >
-      {width > 0 && height > 0 && (
-        <svg
-          ref={svgRef}
-          viewBox={`0 0 ${width} ${height}`}
-          role="img"
-          aria-label={ariaLabel}
-          tabIndex={0}
-          className="h-full w-full touch-pan-y select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-          onPointerMove={handlePointerMove}
-          onPointerDown={handlePointerDown}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
-          onPointerLeave={handlePointerLeave}
-        >
-          {/* Grid lines — no labels, they live in the HTML readout. */}
-          {gridLevels.map((y, index) => (
+    <div className="space-y-1.5">
+      <div
+        ref={wrapRef}
+        className="aspect-[4/3] w-full sm:aspect-[21/9]"
+      >
+        {width > 0 && height > 0 && (
+          <svg
+            ref={svgRef}
+            viewBox={`0 0 ${width} ${height}`}
+            role="img"
+            aria-label={ariaLabel}
+            tabIndex={0}
+            className="h-full w-full touch-pan-y select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            onPointerMove={handlePointerMove}
+            onPointerDown={handlePointerDown}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+            onPointerLeave={handlePointerLeave}
+            onKeyDown={handleKeyDown}
+          >
+            {/* Grid lines — no labels, they live in the HTML readout. */}
+            {gridLevels.map((y, index) => (
+              <line
+                key={index}
+                x1={padLeft}
+                y1={y}
+                x2={width - padRight}
+                y2={y}
+                stroke="currentColor"
+                strokeDasharray="3 3"
+                strokeWidth="1"
+                className="text-border"
+              />
+            ))}
+
+            {/* Baseline & X-axis day ticks */}
             <line
-              key={index}
               x1={padLeft}
-              y1={y}
+              y1={baselineY}
               x2={width - padRight}
-              y2={y}
+              y2={baselineY}
               stroke="currentColor"
-              strokeDasharray="3 3"
               strokeWidth="1"
               className="text-border"
             />
-          ))}
+            {uniqueTickIndices.map((idx) => {
+              const coord = coordinates[idx];
+              return (
+                <line
+                  key={`tick-${idx}`}
+                  x1={coord.x}
+                  y1={baselineY}
+                  x2={coord.x}
+                  y2={baselineY + 4}
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  className="text-muted-foreground"
+                />
+              );
+            })}
 
-          {/* Area under the series — flat, never a gradient. */}
-          <path d={areaD} className="fill-primary/10" />
+            {/* Area under the series — flat, never a gradient. */}
+            <path d={areaD} className="fill-primary/10" />
 
-          {/* The series itself. */}
-          <path
-            d={pathD}
-            fill="none"
-            className="stroke-primary"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-
-          {/* The current point. */}
-          <circle
-            cx={current.x}
-            cy={current.y}
-            r="4.5"
-            strokeWidth="2"
-            className="fill-primary stroke-surface-sunken"
-          />
-
-          {/* The probed point, when there is one. */}
-          {activeCoordinate && (
-            <circle
-              cx={activeCoordinate.x}
-              cy={activeCoordinate.y}
-              r="6"
+            {/* The series itself. */}
+            <path
+              d={pathD}
+              fill="none"
+              className="stroke-primary"
               strokeWidth="2"
-              className="fill-card stroke-primary"
+              strokeLinecap="round"
+              strokeLinejoin="round"
             />
-          )}
-        </svg>
-      )}
+
+            {/* Subtle day dots when series is sparse enough to read individually */}
+            {coordinates.length <= 25 &&
+              coordinates.map((coord, idx) => (
+                <circle
+                  key={`pt-${idx}`}
+                  cx={coord.x}
+                  cy={coord.y}
+                  r="2.5"
+                  className="fill-primary/70"
+                />
+              ))}
+
+            {/* The current point. */}
+            <circle
+              cx={current.x}
+              cy={current.y}
+              r="4.5"
+              strokeWidth="2"
+              className="fill-primary stroke-surface-sunken"
+            />
+
+            {/* Vertical crosshair + point highlight for the selected day. */}
+            {activeCoordinate && (
+              <g>
+                <line
+                  x1={activeCoordinate.x}
+                  y1={padTop}
+                  x2={activeCoordinate.x}
+                  y2={baselineY}
+                  stroke="currentColor"
+                  strokeDasharray="3 3"
+                  strokeWidth="1.5"
+                  className="text-primary"
+                />
+                <circle
+                  cx={activeCoordinate.x}
+                  cy={baselineY}
+                  r="3"
+                  className="fill-primary"
+                />
+                <circle
+                  cx={activeCoordinate.x}
+                  cy={activeCoordinate.y}
+                  r="6"
+                  strokeWidth="2.5"
+                  className="fill-card stroke-primary"
+                />
+              </g>
+            )}
+          </svg>
+        )}
+      </div>
+
+      {/* X-axis day labels in crisp HTML (never scaled inside SVG). */}
+      <div className="flex items-center justify-between gap-2 px-1 text-[11px] tabular-nums text-muted-foreground">
+        {uniqueTickIndices.map((idx) => {
+          const isSelected = activePoint === points[idx];
+          return (
+            <span
+              key={`lbl-${idx}`}
+              className={cn(isSelected && "font-semibold text-primary")}
+            >
+              {formatAxisDay(points[idx].date)}
+            </span>
+          );
+        })}
+      </div>
     </div>
   );
 }
