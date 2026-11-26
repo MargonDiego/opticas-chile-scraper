@@ -12,6 +12,7 @@ export interface DialogProps {
   onOpenChange: (open: boolean) => void;
   title?: React.ReactNode;
   description?: React.ReactNode;
+  subHeader?: React.ReactNode;
   children?: React.ReactNode;
   footer?: React.ReactNode;
   className?: string;
@@ -33,6 +34,7 @@ export function Dialog({
   onOpenChange,
   title,
   description,
+  subHeader,
   children,
   footer,
   className,
@@ -104,7 +106,7 @@ export function Dialog({
         aria-describedby={descriptionId}
         onClick={handleBackdropClick}
         className={cn(
-          "fixed inset-0 m-0 h-dvh max-h-dvh w-full max-w-full overflow-hidden overscroll-contain border-0 bg-transparent p-0 text-foreground",
+          "fixed inset-0 m-0 h-full max-h-full w-full max-w-full overflow-hidden overscroll-contain border-0 bg-transparent p-0 text-foreground",
           className
         )}
       >
@@ -121,11 +123,16 @@ export function Dialog({
                 </div>
                 <DialogClose onClick={() => onOpenChange(false)} />
               </div>
+              {subHeader ? (
+                <div className="shrink-0 border-b border-border bg-card px-4 py-2 sm:px-5 sm:py-2.5">
+                  {subHeader}
+                </div>
+              ) : null}
               <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain px-4 py-3 sm:px-5 sm:py-4">
                 {children}
               </div>
               {footer ? (
-                <div className="shrink-0 border-t border-border px-4 py-3 safe-bottom sm:px-5">
+                <div className="shrink-0 border-t border-border bg-card px-4 py-2.5 safe-bottom sm:px-5 sm:py-3">
                   {footer}
                 </div>
               ) : null}
@@ -150,8 +157,8 @@ const DialogPanel = React.forwardRef<
   <div
     ref={ref}
     className={cn(
-      "relative flex max-h-[92dvh] min-h-0 w-full max-w-none flex-col overflow-hidden rounded-t-2xl sm:rounded-xl border-t sm:border border-border bg-card text-card-foreground shadow-overlay sm:shadow-modal",
-      "sm:h-auto sm:max-h-[calc(100dvh-3rem)] sm:max-w-[560px]",
+      "relative flex max-h-[90%] min-h-0 w-full max-w-none flex-col overflow-hidden rounded-t-2xl sm:rounded-xl border-t sm:border border-border bg-card text-card-foreground shadow-overlay sm:shadow-modal",
+      "sm:h-auto sm:max-h-[calc(100%-3rem)] sm:max-w-[560px]",
       className
     )}
     {...props}

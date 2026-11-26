@@ -222,50 +222,7 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
           Historial de precios y comparación entre ópticas.
         </span>
       }
-      footer={
-        product ? (
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-body-sm text-muted-foreground">
-                Precio actual
-                {(() => {
-                  const freshness = formatPriceFreshness(product.updated_at);
-                  return freshness ? (
-                    <span className={cn(freshness.isStale && "text-warning font-medium")}>
-                      {" · "}{freshness.label}
-                    </span>
-                  ) : null;
-                })()}
-              </p>
-              <div className="flex flex-wrap items-baseline gap-2">
-                <span className="text-price-lg tabular-nums text-foreground">
-                  {formatCLP(currentEffectivePrice)}
-                </span>
-                {hasDiscount && (
-                  <span className="text-body-sm tabular-nums text-muted-foreground line-through">
-                    {formatCLP(product.current_price_normal)}
-                  </span>
-                )}
-              </div>
-            </div>
-            <a
-              href={product.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={cn(
-                buttonVariants({ variant: "default", size: "default" }),
-                "gap-1.5"
-              )}
-            >
-              <span>Ver publicación</span>
-              <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-            </a>
-          </div>
-        ) : null
-      }
-    >
-      {/* Tabs — sticky so they stay reachable while the ledger scrolls. */}
-      <div className="sticky top-0 z-10 -mx-4 -mt-3 border-b border-border bg-card px-4 py-2 sm:-mx-5 sm:-mt-4 sm:px-5 sm:py-3">
+      subHeader={
         <div
           role="tablist"
           aria-label="Secciones del historial de precios"
@@ -278,7 +235,7 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
             aria-selected={activeTab === "history"}
             aria-controls="panel-historial"
             onClick={() => setActiveTab("history")}
-            className={`min-h-11 rounded-sm px-3 text-body-sm font-semibold transition-colors duration-fast ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
+            className={`min-h-11 rounded-sm px-3 text-body-sm font-semibold whitespace-nowrap transition-colors duration-fast ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
               activeTab === "history"
                 ? "bg-accent text-accent-foreground"
                 : "text-muted-foreground hover:text-foreground"
@@ -293,7 +250,7 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
             aria-selected={activeTab === "compare"}
             aria-controls="panel-tiendas"
             onClick={() => setActiveTab("compare")}
-            className={`inline-flex min-h-11 items-center gap-1.5 rounded-sm px-3 text-body-sm font-semibold transition-colors duration-fast ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
+            className={`inline-flex min-h-11 items-center gap-1.5 rounded-sm px-3 text-body-sm font-semibold whitespace-nowrap transition-colors duration-fast ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
               activeTab === "compare"
                 ? "bg-accent text-accent-foreground"
                 : "text-muted-foreground hover:text-foreground"
@@ -307,7 +264,49 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
             )}
           </button>
         </div>
-      </div>
+      }
+      footer={
+        product ? (
+          <div className="flex items-center justify-between gap-2 sm:gap-3">
+            <div className="min-w-0">
+              <p className="truncate text-xs sm:text-body-sm text-muted-foreground">
+                Precio actual
+                {(() => {
+                  const freshness = formatPriceFreshness(product.updated_at);
+                  return freshness ? (
+                    <span className={cn(freshness.isStale && "text-warning font-medium")}>
+                      {" · "}{freshness.label}
+                    </span>
+                  ) : null;
+                })()}
+              </p>
+              <div className="flex flex-wrap items-baseline gap-1.5 sm:gap-2">
+                <span className="text-price sm:text-price-lg tabular-nums text-foreground">
+                  {formatCLP(currentEffectivePrice)}
+                </span>
+                {hasDiscount && (
+                  <span className="text-xs sm:text-body-sm tabular-nums text-muted-foreground line-through">
+                    {formatCLP(product.current_price_normal)}
+                  </span>
+                )}
+              </div>
+            </div>
+            <a
+              href={product.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={cn(
+                buttonVariants({ variant: "default", size: "default" }),
+                "shrink-0 gap-1.5 px-3 sm:px-4"
+              )}
+            >
+              <span>Ver publicación</span>
+              <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            </a>
+          </div>
+        ) : null
+      }
+    >
 
       {loading ? (
         <div className="flex flex-col items-center justify-center gap-3 py-16 text-muted-foreground">
@@ -318,7 +317,7 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
           <p className="text-body-sm">Cargando historial y comparación…</p>
         </div>
       ) : product ? (
-        <div className="space-y-6 pt-4">
+        <div className="space-y-5">
           {/* What the reader is looking at. */}
           <div className="flex items-center gap-4">
             {product.image_url ? (
