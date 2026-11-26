@@ -51,6 +51,21 @@ export function Dialog({
     }
   }, [open]);
 
+  // Native <dialog>.showModal() makes background inert to clicks/focus, but
+  // does not lock document scroll: wheel/touch scroll chaining still scrolls
+  // the page behind the modal.
+  React.useEffect(() => {
+    if (!open) return;
+    const prevHtmlOverflow = document.documentElement.style.overflow;
+    const prevBodyOverflow = document.body.style.overflow;
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.documentElement.style.overflow = prevHtmlOverflow;
+      document.body.style.overflow = prevBodyOverflow;
+    };
+  }, [open]);
+
   // Escape is native: the browser fires `cancel`, we mirror it to the parent.
   React.useEffect(() => {
     const el = dialogRef.current;
@@ -89,7 +104,7 @@ export function Dialog({
         aria-describedby={descriptionId}
         onClick={handleBackdropClick}
         className={cn(
-          "fixed inset-0 m-0 h-dvh max-h-dvh w-full max-w-full overflow-hidden border-0 bg-transparent p-0 text-foreground",
+          "fixed inset-0 m-0 h-dvh max-h-dvh w-full max-w-full overflow-hidden overscroll-contain border-0 bg-transparent p-0 text-foreground",
           className
         )}
       >
@@ -106,7 +121,7 @@ export function Dialog({
                 </div>
                 <DialogClose onClick={() => onOpenChange(false)} />
               </div>
-              <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-3 sm:px-5 sm:py-4">
+              <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain px-4 py-3 sm:px-5 sm:py-4">
                 {children}
               </div>
               {footer ? (
@@ -135,7 +150,7 @@ const DialogPanel = React.forwardRef<
   <div
     ref={ref}
     className={cn(
-      "relative flex max-h-[92dvh] w-full max-w-none flex-col overflow-hidden rounded-t-2xl sm:rounded-xl border-t sm:border border-border bg-card text-card-foreground shadow-overlay sm:shadow-modal",
+      "relative flex max-h-[92dvh] min-h-0 w-full max-w-none flex-col overflow-hidden rounded-t-2xl sm:rounded-xl border-t sm:border border-border bg-card text-card-foreground shadow-overlay sm:shadow-modal",
       "sm:h-auto sm:max-h-[calc(100dvh-3rem)] sm:max-w-[560px]",
       className
     )}
