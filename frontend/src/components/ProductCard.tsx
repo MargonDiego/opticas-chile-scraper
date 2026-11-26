@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { StoreBadge } from "./StoreBadge";
-import { cn, formatCLP } from "@/lib/utils";
+import { cn, formatCLP, formatPriceFreshness } from "@/lib/utils";
 import { History, Glasses, Sun, Eye, ArrowUpRight } from "lucide-react";
 import { Button, buttonVariants } from "./ui/button";
 
@@ -15,6 +15,7 @@ export interface Product {
   current_price_normal?: number;
   current_price_discount?: number;
   current_in_stock?: boolean;
+  updated_at?: string;
 }
 
 interface Props {
@@ -95,18 +96,19 @@ export function ProductCard({ product, onViewHistory }: Props) {
 
   const effectivePrice = product.current_price_discount || product.current_price_normal;
   const CategoryIcon = getCategoryIcon(product.category);
+  const freshness = formatPriceFreshness(product.updated_at);
 
   return (
     <article
       onClick={() => onViewHistory(product.id)}
       className={cn(
         "group relative flex flex-col overflow-hidden rounded-xl border border-border bg-card",
-        "transition-all duration-fast ease-out cursor-pointer",
+        "transition-[border-color,box-shadow] duration-fast ease-out cursor-pointer",
         "hover-supported:hover:border-border-strong hover-supported:hover:shadow-overlay"
       )}
     >
       {/* 1. Image container */}
-      <div className="relative m-2 sm:m-3 flex aspect-[4/3] items-center justify-center rounded-lg bg-white dark:bg-white/95 well-ring overflow-hidden p-2">
+      <div className="relative m-2 sm:m-3 flex aspect-[4/3] items-center justify-center rounded-lg bg-white well-ring overflow-hidden p-2">
         {/* Floating discount badge on image */}
         {hasDiscount && (
           <div className="absolute top-2 left-2 z-10">
@@ -124,7 +126,7 @@ export function ProductCard({ product, onViewHistory }: Props) {
             onViewHistory(product.id);
           }}
           aria-label={`Ver historial de precios de ${product.model_name}`}
-          className="absolute top-2 right-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/50 hover:bg-black/75 text-white backdrop-blur-xs transition-colors shadow-xs"
+          className="absolute top-2 right-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 hover:bg-black/80 text-white transition-colors shadow-xs"
         >
           <History className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
@@ -204,6 +206,17 @@ export function ProductCard({ product, onViewHistory }: Props) {
 
           {isOutOfStock && (
             <p className="text-[10px] sm:text-xs font-medium text-destructive">Sin stock</p>
+          )}
+
+          {freshness && (
+            <p
+              className={cn(
+                "text-[10px] sm:text-[11px] truncate",
+                freshness.isStale ? "text-warning font-medium" : "text-muted-foreground"
+              )}
+            >
+              {freshness.label}
+            </p>
           )}
         </div>
 

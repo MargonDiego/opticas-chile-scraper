@@ -34,6 +34,42 @@ export function formatCLP(amount: number | null | undefined): string {
   return `$${amount.toLocaleString("es-CL")} CLP`;
 }
 
+export interface PriceFreshness {
+  label: string;
+  isStale: boolean;
+}
+
+const STALE_THRESHOLD_MS = 48 * 60 * 60 * 1000;
+
+export function formatPriceFreshness(isoDate?: string | null): PriceFreshness | null {
+  if (!isoDate) return null;
+  const parsed = new Date(isoDate);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  const diffMs = Date.now() - parsed.getTime();
+  const isStale = diffMs > STALE_THRESHOLD_MS;
+
+  if (diffMs < 60 * 60 * 1000) {
+    return { label: "Actualizado hace menos de 1 h", isStale: false };
+  }
+  const hours = Math.floor(diffMs / (60 * 60 * 1000));
+  if (hours < 24) {
+    return { label: `Actualizado hace ${hours} h`, isStale: false };
+  }
+  const days = Math.floor(hours / 24);
+  if (days === 1) {
+    return { label: "Actualizado ayer", isStale: false };
+  }
+  if (days < 7) {
+    return { label: `Actualizado hace ${days} días`, isStale };
+  }
+  const formatted = parsed.toLocaleDateString("es-CL", {
+    day: "numeric",
+    month: "short",
+  });
+  return { label: `Actualizado el ${formatted}`, isStale };
+}
+
 /**
  * Shared focus treatment for every interactive primitive.
  * A 2px petrol ring at 2px offset, visible against both the control and

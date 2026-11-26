@@ -17,7 +17,7 @@ import {
   Glasses,
   X,
 } from "lucide-react";
-import { cn, focusRing } from "@/lib/utils";
+import { cn, focusRing, formatPriceFreshness } from "@/lib/utils";
 
 interface Props {
   apiBaseUrl: string;
@@ -649,6 +649,21 @@ export function CatalogExplorer({ apiBaseUrl, apiKey }: Props) {
                     {totalCount.toLocaleString("es-CL")}
                   </span>{" "}
                   modelos encontrados
+                  {(() => {
+                    const latestTs = products.reduce<string | undefined>(
+                      (best, item) =>
+                        item.updated_at && (!best || item.updated_at > best)
+                          ? item.updated_at
+                          : best,
+                      undefined
+                    );
+                    const freshness = formatPriceFreshness(latestTs);
+                    return freshness ? (
+                      <span className={cn(freshness.isStale && "text-warning font-medium")}>
+                        {" · "}{freshness.label}
+                      </span>
+                    ) : null;
+                  })()}
                 </>
               )}
             </p>

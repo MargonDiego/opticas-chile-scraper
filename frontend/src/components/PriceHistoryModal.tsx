@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Dialog } from "./ui/dialog";
 import { buttonVariants } from "./ui/button";
 import { StoreBadge } from "./StoreBadge";
-import { cn, formatCLP } from "@/lib/utils";
+import { cn, formatCLP, formatPriceFreshness } from "@/lib/utils";
 import {
   Check,
   ExternalLink,
@@ -33,6 +33,7 @@ interface ProductDetail {
   current_price_normal?: number;
   current_price_discount?: number;
   current_in_stock?: boolean;
+  updated_at?: string;
   price_snapshots: Snapshot[];
 }
 
@@ -221,7 +222,17 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
         product ? (
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-body-sm text-muted-foreground">Precio actual</p>
+              <p className="text-body-sm text-muted-foreground">
+                Precio actual
+                {(() => {
+                  const freshness = formatPriceFreshness(product.updated_at);
+                  return freshness ? (
+                    <span className={cn(freshness.isStale && "text-warning font-medium")}>
+                      {" · "}{freshness.label}
+                    </span>
+                  ) : null;
+                })()}
+              </p>
               <div className="flex flex-wrap items-baseline gap-2">
                 <span className="text-price-lg tabular-nums text-foreground">
                   {formatCLP(currentEffectivePrice)}
