@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from typing import AsyncGenerator, Dict, List, Optional
 import httpx
+from curl_cffi.requests import AsyncSession
 from src.config import settings
 from src.models import CategoryEnum
 
@@ -189,6 +190,65 @@ class BaseOpticalScraper(abc.ABC):
             await asyncio.sleep(min(2 ** (attempt - 1), 10))
 
         return last_response
+
+    # Browser fingerprint used by fetch_json_impersonated. Cloudflare-fronted
+    # stores (gmo, karun, place_vendome) answer plain httpx clients with
+    # HTTP 429 but accept curl_cffi presenting Chrome's TLS/HTTP2 profile.
+    IMPERSONATE_BROWSER = "chrome"
+
+    async def fetch_json_impersonated(
+        self, url: str, params: Optional[dict] = None
+    ) -> Optional[dict]:
+        """GET a JSON endpoint with a real browser fingerprint and retries.
+
+        Shares fetch_with_retry's policy: retry transport errors and the
+        RETRYABLE_STATUS_CODES with exponential backoff, honour other status
+        codes as permanent. Returns the decoded JSON payload or None when the
+        endpoint could not be reached or did not answer 200.
+        """
+        attempts = max(1, settings.SCRAPER_RETRY_ATTEMPTS)
+        async with AsyncSession(
+            impersonate=self.IMPERSONATE_BROWSER,
+            timeout=settings.SCRAPER_TIMEOUT_SECONDS,
+        ) as session:
+            for attempt in range(1, attempts + 1):
+                try:
+                    response = await session.get(url, params=params)
+                except Exception as e:
+                    if attempt == attempts:
+                        logger.error(
+                            f"[{self.store_name}] GET {url} failed after {attempts} attempts: {e}"
+                        )
+                        return None
+                    logger.warning(
+                        f"[{self.store_name}] GET {url} attempt {attempt}/{attempts} failed ({e}), retrying..."
+                    )
+                else:
+                    if response.status_code == 200:
+                        try:
+                            return response.json()
+                        except Exception as e:
+                            logger.error(
+                                f"[{self.store_name}] GET {url} returned invalid JSON: {e}"
+                            )
+                            return None
+                    if response.status_code not in self.RETRYABLE_STATUS_CODES:
+                        logger.warning(
+                            f"[{self.store_name}] GET {url} returned status {response.status_code}"
+                        )
+                        return None
+                    if attempt == attempts:
+                        logger.error(
+                            f"[{self.store_name}] GET {url} still returning {response.status_code} after {attempts} attempts"
+                        )
+                        return None
+                    logger.warning(
+                        f"[{self.store_name}] GET {url} attempt {attempt}/{attempts} got status {response.status_code}, retrying..."
+                    )
+
+                await asyncio.sleep(min(2 ** (attempt - 1), 10))
+
+        return None
 
     def parse_shopify_product(self, prod: dict, default_vendor: str) -> Optional[ScrapedItem]:
         """Parse a single item from a public Shopify `products.json` feed.

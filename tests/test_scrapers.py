@@ -1,12 +1,18 @@
 import pytest
 from bs4 import BeautifulSoup
+from src.config import settings
+from src.models import JobStatusEnum
+from src.scrapers import registry as scraper_registry
+from src import scheduler as scraper_scheduler
+from src.scrapers import base as base_module
+from src.scrapers.base import BaseOpticalScraper
 from src.scrapers.gmo import GMOScraper
 from src.scrapers.place_vendome import PlaceVendomeScraper
 from src.scrapers.karun import KarunScraper
 from src.scrapers.rotter_krauss import RotterKraussScraper
 from src.scrapers.schilling import SchillingScraper
 from src.scrapers.econopticas import EconopticasScraper
-from src.scrapers.registry import get_available_stores
+from src.scrapers.registry import execute_scrape_for_store, get_available_stores
 
 
 def test_scraper_registry():
@@ -167,3 +173,208 @@ def test_place_vendome_parse_vtex():
     assert item.price_normal == 120000
     assert item.price_discount == 89000
     assert item.is_in_stock is True
+
+
+class _EmptyScraper(BaseOpticalScraper):
+    """Scraper that completes normally but yields nothing."""
+
+    def __init__(self):
+        super().__init__(store_name="test_empty", base_url="https://example.invalid")
+
+    async def scrape_catalog(self, max_pages=None):
+        for _ in ():
+            yield _
+
+
+async def test_execute_scrape_marks_failed_when_zero_items(monkeypatch):
+    monkeypatch.setitem(scraper_registry.SCRAPER_REGISTRY, "test_empty", _EmptyScraper)
+
+    job = await execute_scrape_for_store("test_empty", max_pages=1)
+
+    assert job.status == JobStatusEnum.FAILED.value
+    assert job.error_message == "Scraper returned 0 items"
+    assert job.items_scraped == 0
+    assert job.completed_at is not None
+
+
+# --- curl_cffi impersonated fetch helper -------------------------------------
+
+
+class _FakeResponse:
+    def __init__(self, status_code, payload=None):
+        self.status_code = status_code
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+class _FakeAsyncSession:
+    """Stands in for curl_cffi.requests.AsyncSession in unit tests."""
+
+    def __init__(self, responses):
+        self._responses = list(responses)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc_info):
+        return False
+
+    async def get(self, url, params=None):
+        response = self._responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+
+def _patch_session(monkeypatch, responses):
+    monkeypatch.setattr(
+        base_module,
+        "AsyncSession",
+        lambda **kwargs: _FakeAsyncSession(responses),
+    )
+    # Retries would otherwise really sleep between attempts.
+    async def _no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(base_module.asyncio, "sleep", _no_sleep)
+    monkeypatch.setattr(settings, "SCRAPER_RETRY_ATTEMPTS", 3)
+
+
+async def test_fetch_json_impersonated_returns_payload(monkeypatch):
+    _patch_session(monkeypatch, [_FakeResponse(200, {"products": [{"id": 1}]})])
+
+    data = await GMOScraper().fetch_json_impersonated("https://gmo.cl/products.json")
+
+    assert data == {"products": [{"id": 1}]}
+
+
+async def test_fetch_json_impersonated_retries_429_then_gives_up(monkeypatch):
+    _patch_session(
+        monkeypatch,
+        [_FakeResponse(429), _FakeResponse(429), _FakeResponse(429)],
+    )
+
+    data = await GMOScraper().fetch_json_impersonated("https://gmo.cl/products.json")
+
+    assert data is None
+
+
+async def test_fetch_json_impersonated_retries_transport_error(monkeypatch):
+    _patch_session(
+        monkeypatch,
+        [RuntimeError("connection reset"), _FakeResponse(200, {"products": []})],
+    )
+
+    data = await GMOScraper().fetch_json_impersonated("https://gmo.cl/products.json")
+
+    assert data == {"products": []}
+
+
+async def test_fetch_json_impersonated_returns_none_on_permanent_status(monkeypatch):
+    _patch_session(monkeypatch, [_FakeResponse(404)])
+
+    data = await GMOScraper().fetch_json_impersonated("https://gmo.cl/products.json")
+
+    assert data is None
+
+
+async def test_gmo_scraper_handles_fetch_failure_without_raising(monkeypatch):
+    async def _fail(_self, url, params=None):
+        return None
+
+    monkeypatch.setattr(GMOScraper, "fetch_json_impersonated", _fail)
+
+    items = [item async for item in GMOScraper().scrape_catalog(max_pages=1)]
+
+    assert items == []
+
+
+async def test_gmo_scraper_yields_items_from_impersonated_fetch(monkeypatch):
+    page_one = {
+        "products": [
+            {
+                "id": 1,
+                "title": "Ray-Ban Aviador",
+                "vendor": "Ray-Ban",
+                "handle": "ray-ban-aviador",
+                "product_type": "Sol",
+                "images": [],
+                "variants": [{"price": "99000", "compare_at_price": None, "available": True}],
+            }
+        ]
+    }
+
+    async def _fetch(_self, url, params=None):
+        return page_one if "page=1" in url else {"products": []}
+
+    monkeypatch.setattr(GMOScraper, "fetch_json_impersonated", _fetch)
+
+    items = [item async for item in GMOScraper().scrape_catalog(max_pages=1)]
+
+    assert len(items) == 1
+    assert items[0].store == "gmo"
+    assert items[0].store_product_id == "1"
+
+
+# --- scheduler cross-process lock -------------------------------------------
+
+
+async def test_scheduled_scrape_lock_is_exclusive(monkeypatch, tmp_path):
+    monkeypatch.setattr(scraper_scheduler, "SCRAPE_LOCK_FILE", tmp_path / "scrape.lock")
+
+    async with scraper_scheduler.scheduled_scrape_lock() as first:
+        assert first is True
+        async with scraper_scheduler.scheduled_scrape_lock() as second:
+            assert second is False
+
+    # Released on exit, so the next acquisition wins again.
+    async with scraper_scheduler.scheduled_scrape_lock() as again:
+        assert again is True
+
+
+async def test_scheduled_scrape_skips_when_lock_is_held(monkeypatch, tmp_path):
+    monkeypatch.setattr(scraper_scheduler, "SCRAPE_LOCK_FILE", tmp_path / "scrape.lock")
+    calls = []
+
+    async def _record(store, max_pages=None):
+        calls.append(store)
+
+    monkeypatch.setattr(scraper_scheduler, "execute_scrape_for_store", _record)
+    monkeypatch.setattr(scraper_scheduler, "get_available_stores", lambda: ["gmo"])
+
+    async with scraper_scheduler.scheduled_scrape_lock() as held:
+        assert held is True
+        await scraper_scheduler.scheduled_scrape_all_stores()
+
+    assert calls == []
+
+
+async def test_scheduled_scrape_runs_when_lock_is_free(monkeypatch, tmp_path):
+    monkeypatch.setattr(scraper_scheduler, "SCRAPE_LOCK_FILE", tmp_path / "scrape.lock")
+    calls = []
+
+    async def _record(store, max_pages=None):
+        calls.append(store)
+
+    monkeypatch.setattr(scraper_scheduler, "execute_scrape_for_store", _record)
+    monkeypatch.setattr(scraper_scheduler, "get_available_stores", lambda: ["gmo", "karun"])
+
+    await scraper_scheduler.scheduled_scrape_all_stores()
+
+    assert calls == ["gmo", "karun"]
+
+
+async def test_stale_lock_file_is_stolen(monkeypatch, tmp_path):
+    lock_file = tmp_path / "scrape.lock"
+    monkeypatch.setattr(scraper_scheduler, "SCRAPE_LOCK_FILE", lock_file)
+    lock_file.write_text("999")
+    # Age the lock file past the staleness window.
+    import os
+
+    old = lock_file.stat().st_mtime - scraper_scheduler._SCRAPE_LOCK_STALE_SECONDS - 60
+    os.utime(lock_file, (old, old))
+
+    async with scraper_scheduler.scheduled_scrape_lock() as acquired:
+        assert acquired is True

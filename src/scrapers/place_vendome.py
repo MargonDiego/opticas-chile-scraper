@@ -1,7 +1,5 @@
 import logging
 from typing import AsyncGenerator, Optional
-import httpx
-from bs4 import BeautifulSoup
 from src.scrapers.base import BaseOpticalScraper, ScrapedItem, detect_category
 
 logger = logging.getLogger(__name__)
@@ -17,53 +15,36 @@ class PlaceVendomeScraper(BaseOpticalScraper):
         self, max_pages: Optional[int] = None
     ) -> AsyncGenerator[ScrapedItem, None]:
         limit_pages = max_pages or 50
-        async with await self.get_client() as client:
-            for page in range(1, limit_pages + 1):
-                # Try Shopify products.json with limit=250
-                url = f"{self.base_url}/products.json?limit=250&page={page}"
-                res = await self.fetch_with_retry(client, "GET", url)
-                if res is None:
-                    logger.error(f"Place Vendome page {page} unreachable after retries, stopping catalog scrape")
+        for page in range(1, limit_pages + 1):
+            # Primary feed: Shopify products.json. VTEX search is the fallback
+            # when the Shopify feed is unavailable.
+            url = f"{self.base_url}/products.json?limit=250&page={page}"
+            data = await self.fetch_json_impersonated(url)
+            if data is not None:
+                products = data.get("products", [])
+                if not products:
+                    if page == 1:
+                        logger.error("Place Vendome Shopify feed returned zero products on page 1 - possible API/selector break")
                     break
+                for prod in products:
+                    item = self._parse_shopify(prod)
+                    if item:
+                        yield item
+                continue
 
-                if res.status_code == 200:
-                    try:
-                        data = res.json()
-                        products = data.get("products", [])
-                    except Exception as e:
-                        logger.error(f"Error parsing Place Vendome Shopify page {page}: {e}")
-                        break
-                    if not products:
-                        if page == 1:
-                            logger.error("Place Vendome Shopify feed returned zero products on page 1 - possible API/selector break")
-                        break
-                    for prod in products:
-                        item = self._parse_shopify(prod)
-                        if item:
-                            yield item
-                else:
-                    # Fallback VTEX search
-                    vtex_url = f"{self.base_url}/api/catalog_system/pub/products/search?_from={(page-1)*50}&_to={page*50-1}"
-                    vtex_res = await self.fetch_with_retry(client, "GET", vtex_url)
-                    if vtex_res is None:
-                        logger.error(f"Place Vendome VTEX fallback page {page} unreachable after retries, stopping catalog scrape")
-                        break
-                    if vtex_res.status_code != 200:
-                        logger.warning(f"Place Vendome VTEX fallback returned status {vtex_res.status_code}")
-                        break
-                    try:
-                        vtex_items = vtex_res.json()
-                    except Exception as e:
-                        logger.error(f"Error parsing Place Vendome VTEX page {page}: {e}")
-                        break
-                    if not vtex_items:
-                        if page == 1:
-                            logger.error("Place Vendome VTEX feed returned zero products on page 1 - possible API/selector break")
-                        break
-                    for prod in vtex_items:
-                        item = self._parse_vtex(prod)
-                        if item:
-                            yield item
+            vtex_url = f"{self.base_url}/api/catalog_system/pub/products/search?_from={(page-1)*50}&_to={page*50-1}"
+            vtex_items = await self.fetch_json_impersonated(vtex_url)
+            if vtex_items is None:
+                logger.error(f"Place Vendome VTEX fallback page {page} unreachable after retries, stopping catalog scrape")
+                break
+            if not vtex_items:
+                if page == 1:
+                    logger.error("Place Vendome VTEX feed returned zero products on page 1 - possible API/selector break")
+                break
+            for prod in vtex_items:
+                item = self._parse_vtex(prod)
+                if item:
+                    yield item
 
     def _parse_shopify(self, prod: dict) -> Optional[ScrapedItem]:
         return self.parse_shopify_product(prod, default_vendor="Place Vendome")

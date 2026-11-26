@@ -172,10 +172,22 @@ async def execute_scrape_for_store(store: str, max_pages: Optional[int] = None) 
                 if items_scraped % 50 == 0:
                     await session.commit()
 
-            job.status = JobStatusEnum.COMPLETED.value
             job.items_scraped = items_scraped
             job.items_updated = items_updated
             job.completed_at = datetime.utcnow()
+            if items_scraped == 0:
+                # A scraper that finishes without raising but yielded nothing
+                # (e.g. an upstream 429 swallowed into a warning) is a failure,
+                # not a successful empty catalog - otherwise it looks healthy
+                # while the store silently stops updating.
+                job.status = JobStatusEnum.FAILED.value
+                job.error_message = "Scraper returned 0 items"
+                await session.commit()
+                await session.refresh(job)
+                logger.error(f"Scrape for {store} returned 0 items; marking job as FAILED.")
+                return job
+
+            job.status = JobStatusEnum.COMPLETED.value
             await session.commit()
             await session.refresh(job)
             invalidate_catalog_cache()
