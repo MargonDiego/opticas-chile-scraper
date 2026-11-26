@@ -118,6 +118,7 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
     if (!productId) return;
     setLoading(true);
     setHoveredPoint(null);
+    setActiveTab("history");
 
     const headers = { "X-API-Key": apiKey };
 
@@ -140,10 +141,13 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
       });
   }, [productId, apiBaseUrl, apiKey]);
 
-  // Process timeline data for the SVG chart
-  const snapshots = (product?.price_snapshots || []).slice().sort(
-    (a, b) => new Date(a.scraped_at).getTime() - new Date(b.scraped_at).getTime()
-  );
+  // Process timeline data for the SVG chart (discard corrupt < $1.000 CLP snapshots)
+  const snapshots = (product?.price_snapshots || [])
+    .filter((s) => (s.price_discount || s.price_normal) >= 1000)
+    .slice()
+    .sort(
+      (a, b) => new Date(a.scraped_at).getTime() - new Date(b.scraped_at).getTime()
+    );
 
   const chartPoints: ChartPoint[] = snapshots.map((s) => ({
     date: new Date(s.scraped_at),
@@ -164,9 +168,9 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
   const minHistoricalPrice = allEffectivePrices.length > 0 ? Math.min(...allEffectivePrices) : 0;
   const maxHistoricalPrice = allEffectivePrices.length > 0 ? Math.max(...allEffectivePrices) : 0;
   const currentEffectivePrice =
-    chartPoints.length > 0
-      ? chartPoints[chartPoints.length - 1].effectivePrice
-      : product?.current_price_discount || product?.current_price_normal || 0;
+    product?.current_price_discount ||
+    product?.current_price_normal ||
+    (chartPoints.length > 0 ? chartPoints[chartPoints.length - 1].effectivePrice : 0);
 
   const isCurrentAtAllTimeLow =
     minHistoricalPrice > 0 && currentEffectivePrice <= minHistoricalPrice;
@@ -261,11 +265,11 @@ export function PriceHistoryModal({ productId, onClose, apiBaseUrl, apiKey }: Pr
       }
     >
       {/* Tabs — sticky so they stay reachable while the ledger scrolls. */}
-      <div className="sticky top-0 z-10 -mx-5 -mt-4 border-b border-border bg-card px-5 py-3">
+      <div className="sticky top-0 z-10 -mx-4 -mt-3 border-b border-border bg-card px-4 py-2 sm:-mx-5 sm:-mt-4 sm:px-5 sm:py-3">
         <div
           role="tablist"
           aria-label="Secciones del historial de precios"
-          className="flex flex-wrap items-center gap-2"
+          className="flex flex-nowrap items-center gap-1.5 sm:gap-2"
         >
           <button
             type="button"
